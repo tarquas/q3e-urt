@@ -97,6 +97,7 @@ void SVM_ClientThink(client_t *cl) {
 
 		if (isLame) {
 			othps = SV_GameClientNum(othid);
+			if (othps->pm_type == PM_DEAD) continue;  // no collision with dead players already
 			if (ps->persistant[PERS_TEAM] != othps->persistant[PERS_TEAM]) continue;  // ok to collide with enemy
 			if (svm_players[othid].isLame) continue;  // ok to collide with other lamers
 			cl->lastUsercmd.buttons &= ~BUTTON_ATTACK; // deny attacking
@@ -171,8 +172,8 @@ static void SVM_SetLamer_f( void ) {
 		return;
 	}
 
-	if ( Cmd_Argc() != 3 ) {
-		Com_Printf ("Usage: setlamer <player name> <0|1>\n");
+	if ( Cmd_Argc() < 2 ) {
+		Com_Printf ("Usage: setlamer <player name> [<0|1>]\n");
 		return;
 	}
 
@@ -184,8 +185,14 @@ static void SVM_SetLamer_f( void ) {
 	}
 
 	id = (int)(cl - svs.clients);
-	set = atoi(Cmd_Argv(2)) != 0;
-	svm_players[id].isLame = set;
+
+	if (Cmd_Argc() == 3) {
+		set = atoi(Cmd_Argv(2)) != 0;
+		svm_players[id].isLame = set;
+	} else {
+		set = svm_players[id].isLame;
+	}
+
 	Com_Printf("player %s has lamer status %s\n", Cmd_Argv(1), set ? "set" : "unset");
 }
 

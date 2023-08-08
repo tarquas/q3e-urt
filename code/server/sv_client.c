@@ -416,6 +416,7 @@ static const char *SV_FindCountry( const char *tld ) {
 	return "Unknown Location";
 }
 
+cvar_t *sv_bad_password_message;
 
 /*
 ==================
@@ -747,6 +748,8 @@ gotnewcl:
 	if ( denied ) {
 		// we can't just use VM_ArgPtr, because that is only valid inside a VM_Call
 		const char *str = GVM_ArgPtr( denied );
+
+		if (!strcmp(str, "Invalid password")) str = sv_bad_password_message->string;
 
 		NET_OutOfBandPrint( NS_SERVER, from, "print\n%s\n", str );
 		Com_DPrintf( "Game rejected a connection: %s.\n", str );

@@ -407,6 +407,8 @@ extern	cvar_t	*sv_demonotice;
 extern  cvar_t  *sv_demofolder;
 #endif
 
+extern	cvar_t	*sv_bad_password_message;
+
 //===========================================================
 
 //

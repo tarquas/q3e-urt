@@ -105,7 +105,7 @@ cvar_t	*com_cameraMode;
 cvar_t	*com_noErrorInterrupt;
 #endif
 
-cvar_t	*sv_shutdown_message;
+cvar_t	*com_shutdown_message;
 
 // com_speeds times
 int		time_game;
@@ -418,7 +418,7 @@ parse string with some C escape sequences -- allow more characters to strings se
 */
 void unescape_string(char *s) {
 	char *p = s, c;
-	for (; c = *s; ++s, ++p) {
+	for (; (c = *s); ++s, ++p) {
 		if (c == '\\') {
 			++s;
 			switch (*s) {
@@ -447,7 +447,7 @@ void Com_Quit_f( void ) {
 	const char *p = Cmd_ArgsFrom( 1 );
 
 	if (!*p) {
-		p = sv_shutdown_message->string;
+		p = com_shutdown_message->string;
 	}
 	unescape_string((char *) p);
 
@@ -3770,8 +3770,8 @@ void Com_Init( char *commandLine ) {
 
 #endif
 
-	sv_shutdown_message = Cvar_Get( "sv_shutdown_message", "", 0 );
-	Cvar_SetDescription(sv_shutdown_message, "Message for clients displayed on \"quit\" command by default\nDefault: \"\"");
+	com_shutdown_message = Cvar_Get( "com_shutdown_message", "", 0 );
+	Cvar_SetDescription(com_shutdown_message, "Message for clients displayed on \"quit\" command by default\nDefault: \"\"");
 
 	if ( com_dedicated->integer ) {
 		if ( !com_viewlog->integer ) {

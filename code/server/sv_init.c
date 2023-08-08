@@ -942,6 +942,9 @@ void SV_Init( void )
     sv_filter = Cvar_Get( "sv_filter", "filter.txt", CVAR_ARCHIVE );
     Cvar_SetDescription(sv_filter, "Set the ban filter file\nDefault: filter.txt");
 
+	sv_bad_password_message = Cvar_Get( "sv_bad_password_message", "Invalid password", CVAR_ARCHIVE );
+	Cvar_SetDescription(sv_bad_password_message, "Send this message when client tries connecting with invalid password\nDefault: Invalid password");
+
     // initialize bot cvars so they are listed and can be set before loading the botlib
 	SV_BotInitCvars();
 

@@ -28,6 +28,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  *****************************************************************************/
 
+#include <stdio.h>
+#include <unistd.h>
+#include <stdarg.h>
+#include <string.h>
 
 #include "q_shared.h"
 #include "qcommon.h"
@@ -372,6 +376,21 @@ static int FS_GetModList( char *listbuf, int bufsize );
 //static void FS_CheckIdPaks( void );
 void FS_Reload( void );
 
+//====== MINI PK3
+
+#define PK3NAME_MAXLEN  1024
+#define CSUMHEX_MAXLEN  (PK3NAME_MAXLEN * PK3NAME_MAXLEN)
+
+#define PK3NAMES_FILENAME  "q3ut4/zUrTpk3.txt"
+#define CSUMHEX_FILENAME  "q3ut4/zUrTpk3.crc"
+#define CSUMHEX_FILENAME_TMP  "q3ut4/zUrTpk3.crc.tmp"
+
+static cvar_t  *fs_acquire_checksums;
+static int     inMainDirAcquire = 0;
+static char    *fs_lastBuiltOsPath = 0;
+
+//======
+
 
 /*
 ==============
@@ -571,8 +590,8 @@ char *FS_BuildOSPath( const char *base, const char *game, const char *qpath ) {
 
 	FS_ReplaceSeparators( temp );
 	Com_sprintf( ospath[toggle], sizeof( ospath[0] ), "%s%s", base, temp );
-	
-	return ospath[toggle];
+
+	return fs_lastBuiltOsPath = ospath[toggle];
 }
 
 
@@ -2672,6 +2691,64 @@ static qboolean FS_SavePackToFile( const pack_t *pak, FILE *f )
 }
 
 
+unsigned Fs_BlockChecksum(const void *buffer, int length, int pure) {
+	// int pure = *(int *)buffer == fs_checksumFeed;
+	char *name = 0;
+	int exists = 0;
+	char buf[CSUMHEX_MAXLEN], *p = buf;
+	unsigned char *b = (unsigned char *) buffer;
+	int i, c = CSUMHEX_MAXLEN, n = 0, v;
+
+	if (inMainDirAcquire) {
+		name = pure ? 0 : CSUMHEX_FILENAME_TMP;
+	} else {
+		if (fs_lastBuiltOsPath) {
+			snprintf(buf, c, "%s.crc", fs_lastBuiltOsPath);
+			name = buf;
+			exists = access(name, F_OK) != -1;
+		}
+	}
+
+	if (exists) {
+		FILE *csumFile = fopen(name, "r");
+		b = (unsigned char *) p;
+
+		if (csumFile) {
+			if (pure) {
+				*(int *)p = *(int *) buffer;
+				p += sizeof(int);
+				b += sizeof(int);
+			}
+
+			n = fread(p, 1, c, csumFile);
+			while (n && p[n - 1] < '0') n--;
+
+			for (i = 0; i < n; i += 2, b++, p += 2) {
+				sscanf(p, "%02x", &v);
+				*b = (unsigned char) v;
+			}
+
+			fclose(csumFile);
+		}
+
+		return Com_BlockChecksum(buf, (char *) b - buf);
+	}
+
+	if (name) {
+		if (pure) b += sizeof(int);
+		FILE *csumFile = fopen(name, "a+");
+		for (i = 0; i < length; i++, b++) snprintf(p += n, c -= n, "%02x%n", *b, &n);
+
+		if (csumFile) {
+			fprintf(csumFile, "%s\n", buf);
+			fclose(csumFile);
+		}
+	}
+
+	return Com_BlockChecksum(buffer, length);
+}
+
+
 static qboolean FS_LoadPakFromFile( FILE *f )
 {
 	fileTime_t ctime, mtime;
@@ -3154,10 +3231,10 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 		unzGoToNextFile( uf );
 	}
 
-	pack->checksum = Com_BlockChecksum( fs_headerLongs + 1, sizeof( fs_headerLongs[0] ) * ( fs_numHeaderLongs - 1 ) );
+	pack->checksum = Fs_BlockChecksum( fs_headerLongs + 1, sizeof( fs_headerLongs[0] ) * ( fs_numHeaderLongs - 1 ), 0 );
 	pack->checksum = LittleLong( pack->checksum );
 
-	pack->pure_checksum = Com_BlockChecksum( fs_headerLongs, sizeof( fs_headerLongs[0] ) * fs_numHeaderLongs );
+	pack->pure_checksum = Fs_BlockChecksum( fs_headerLongs, sizeof( fs_headerLongs[0] ) * fs_numHeaderLongs, 1 );
 	pack->pure_checksum = LittleLong( pack->pure_checksum );
 
 #ifdef USE_PK3_CACHE
@@ -4118,6 +4195,7 @@ static void FS_Which_f( void ) {
 
 //===========================================================================
 
+
 /*
 ================
 FS_AddGameDirectory
@@ -4143,6 +4221,17 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 	int				pakwhich;
 	int				path_len;
 	int				dir_len;
+
+	inMainDirAcquire = (
+		fs_acquire_checksums->integer &&
+		!strcmp(path, fs_basepath->string) &&
+		!strcmp(dir, fs_basegame->string)
+	);
+
+	if (inMainDirAcquire) {
+		FILE *csumFile = fopen(CSUMHEX_FILENAME_TMP, "w");
+		if (csumFile) fclose(csumFile);
+	}
 
 	for ( sp = fs_searchpaths ; sp ; sp = sp->next ) {
 		if ( sp->dir && !Q_stricmp( sp->dir->path, path ) && !Q_stricmp( sp->dir->gamedir, dir )) {
@@ -4288,6 +4377,9 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 	// done
 	Sys_FreeFileList( pakdirs );
 	Sys_FreeFileList( pakfiles );
+
+	if (inMainDirAcquire) rename(CSUMHEX_FILENAME_TMP, CSUMHEX_FILENAME);
+	fs_lastBuiltOsPath = 0;
 }
 
 
@@ -4639,14 +4731,132 @@ static void FS_ListOpenFiles_f( void ) {
 	}
 }
 
+// =================== zUrTpk3
+
+void AppendNames(const char* names, int prefix) {
+	FILE *nameFile = fopen(PK3NAMES_FILENAME, "r");
+
+	if (nameFile) {
+		char *ptail = strstr(names, " ");
+		char tail[BIG_INFO_STRING];
+		if (ptail) strcpy(tail, ++ptail);
+
+		int nbuf, namesl = ptail ? ptail - names : strlen(names), namesn = 0, namesc = BIG_INFO_STRING - namesl;
+		char buf[PK3NAME_MAXLEN], *namestail = (char *) names + namesl;
+
+		while (!feof(nameFile)) {
+			if (!fgets(buf, sizeof(buf), nameFile)) break;
+			if (*buf == ';' || *buf == '#' || *buf == '\n' || *buf == ' ') continue;
+			nbuf = strlen(buf);
+			if (!nbuf) break;
+			while (nbuf && buf[nbuf - 1] <= ' ') buf[--nbuf] = 0;
+			if (!nbuf) break;
+
+			if (prefix) {
+				snprintf(namestail += namesn, namesc -= namesn, "%s/%s %n", fs_basegame->string, buf, &namesn);
+			} else {
+				snprintf(namestail += namesn, namesc -= namesn, "%s %n", buf, &namesn);
+			}
+		}
+
+		if (ptail) {
+			namestail += namesn;
+			strcpy(namestail, tail);
+		}
+
+		fclose(nameFile);
+	}
+}
+
+void AppendChecksums(const char *csums, int pure) {
+	FILE *csumFile = fopen(CSUMHEX_FILENAME, "r");
+
+	if (csumFile) {
+		char *ptail = strstr(csums, " ");
+		char tail[BIG_INFO_STRING];
+		if (ptail) strcpy(tail, ++ptail);
+
+		int csum, nbuf, n = 0, csumsl = ptail ? ptail - csums : strlen(csums), csumsn = 0, csumsc = BIG_INFO_STRING - csumsl;
+		char buf[CSUMHEX_MAXLEN], *pbuf, block[CSUMHEX_MAXLEN / 2], *pblock;
+		char *csumstail = (char *) csums + csumsl, *iblock = block;
+
+		unsigned int b;
+
+		if (pure) {
+			*(int *)block = LittleLong(fs_checksumFeed);
+			iblock = block + sizeof(int);
+		}
+
+		while (!feof(csumFile)) {
+			if (!fgets(buf, sizeof(buf), csumFile)) break;
+			if (*buf == ';' || *buf == '#' || *buf == '\n' || *buf == ' ') continue;
+			nbuf = strlen(buf);
+			if (!nbuf) break;
+			while (nbuf && buf[nbuf - 1] <= ' ') buf[--nbuf] = 0;
+			if (!nbuf) break;
+			pblock = iblock;
+
+			for (pbuf = buf; *pbuf && *pbuf != '\n'; pbuf += n) {
+				sscanf(pbuf, "%02x%n", &b, &n);
+				*(pblock++) = (char) b;
+			}
+
+			csum = Com_BlockChecksum(block, pblock - block);
+			snprintf(csumstail += csumsn, csumsc -= csumsn, "%d %n", csum, &csumsn);
+		}
+
+		if (ptail) {
+			csumstail += csumsn;
+			strcpy(csumstail, tail);
+		}
+
+		fclose(csumFile);
+	}
+}
+
+static int fs_numPureChecksums;
+static int fs_pureChecksum[ MAX_FOUND_FILES ];
+
+void AppendPureChecksums(void) {
+	FILE *csumFile = fopen(CSUMHEX_FILENAME, "r");
+
+	if (csumFile) {
+		int csum, nbuf, n = 0;
+		char buf[CSUMHEX_MAXLEN], *pbuf, block[CSUMHEX_MAXLEN / 2], *pblock;
+		char *iblock = block;
+
+		unsigned int b;
+
+		*(int *)block = LittleLong(fs_checksumFeed);
+		iblock = block + sizeof(int);
+
+		while (!feof(csumFile)) {
+			if (!fgets(buf, sizeof(buf), csumFile)) break;
+			if (*buf == ';' || *buf == '#' || *buf == '\n' || *buf == ' ') continue;
+			nbuf = strlen(buf);
+			if (!nbuf) break;
+			while (nbuf && buf[nbuf - 1] <= ' ') buf[--nbuf] = 0;
+			if (!nbuf) break;
+			pblock = iblock;
+
+			for (pbuf = buf; *pbuf && *pbuf != '\n'; pbuf += n) {
+				sscanf(pbuf, "%02x%n", &b, &n);
+				*(pblock++) = (char) b;
+			}
+
+			csum = Com_BlockChecksum(block, pblock - block);
+			fs_pureChecksum[ fs_numPureChecksums++ ] = csum;
+		}
+
+		fclose(csumFile);
+	}
+}
 
 /*
 =====================
 FS_LoadedPakPureChecksums
 =====================
 */
-static int fs_numPureChecksums;
-static int fs_pureChecksum[ MAX_FOUND_FILES ];
 
 static void FS_LoadedPakPureChecksums( void )
 {
@@ -4664,6 +4874,7 @@ static void FS_LoadedPakPureChecksums( void )
 			fs_numPureChecksums++;
 		}
 	}
+	AppendPureChecksums();
 }
 
 
@@ -5012,6 +5223,7 @@ const char *FS_LoadedPakChecksums( qboolean *overflowed ) {
 		s = Q_stradd( s, buf );
 	}
 
+	AppendChecksums(info, 0);
 	return info;
 }
 
@@ -5056,6 +5268,7 @@ const char *FS_LoadedPakNames( void ) {
 		s = Q_stradd( s, search->pack->pakBasename );
 	}
 
+	AppendNames(info, 0);
 	return info;
 }
 #endif
@@ -5087,6 +5300,7 @@ const char *FS_ReferencedPakChecksums( void ) {
 		}
 	}
 
+	AppendChecksums(info, 0);
 	return info;
 }
 
@@ -5143,7 +5357,8 @@ const char *FS_ReferencedPakPureChecksums( int maxlen ) {
 		Com_Printf( S_COLOR_YELLOW "WARNING: pure checksum list is too long (%i), you might be not able to play on remote server!\n", (int)(s - info) );
 		*max = '\0';
 	}
-	
+
+	AppendChecksums(info, 1);
 	return info;
 }
 
@@ -5218,6 +5433,7 @@ const char *FS_ReferencedPakNames( void ) {
 		}
 	}
 
+	AppendNames(info, 1);
 	return info;
 }
 
@@ -5406,6 +5622,9 @@ void FS_InitFilesystem( void ) {
 #ifdef _WIN32
  	_setmaxstdio( 2048 );
 #endif
+
+	fs_acquire_checksums = Cvar_Get( "fs_acquire_checksums", "0", 0 );
+	Cvar_SetDescription(fs_acquire_checksums, "Acquire and store the checksums for zUrT pk3 files\nDefault: \"0\"");
 
 	// try to start up normally
 	FS_Restart( 0 );
