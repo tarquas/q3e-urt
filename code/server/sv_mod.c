@@ -163,7 +163,7 @@ char* SVM_ClientConnect(client_t *cl) {
 
 static void SVM_SetLamer_f( void ) {
 	client_t  *cl;
-	int       id;
+	int       id, set;
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
@@ -184,11 +184,9 @@ static void SVM_SetLamer_f( void ) {
 	}
 
 	id = (int)(cl - svs.clients);
-	Com_Printf("id: %d\n", id);
-	Com_Printf("0: %s\n", Cmd_Argv(0));
-	Com_Printf("1: %s\n", Cmd_Argv(1));
-	Com_Printf("2: %s\n", Cmd_Argv(2));
-	svm_players[id].isLame = atoi(Cmd_Argv(2)) != 0;
+	set = atoi(Cmd_Argv(2)) != 0;
+	svm_players[id].isLame = set;
+	Com_Printf("player %s has lamer status %s\n", Cmd_Argv(1), set ? "set" : "unset");
 }
 
 
