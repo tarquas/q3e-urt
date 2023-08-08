@@ -1030,6 +1030,8 @@ void		Com_GameRestart( int checksumFeed, qboolean clientRestart );
 int			Com_EventLoop( void );
 int			Com_Milliseconds( void );	// will be journaled properly
 
+void unescape_string(char *s);
+
 // MD4 functions
 unsigned	Com_BlockChecksum( const void *buffer, int length );
 

@@ -736,6 +736,12 @@ gotnewcl:
 		SV_SaveSequences();
 	}
 
+	if ((v = SVM_ClientConnect(newcl))) {
+		NET_OutOfBandPrint( NS_SERVER, from, "print\n%s\n", v );
+		Com_DPrintf( "Mod rejected a connection: %s.\n", v );
+		return;
+	}
+
 	// get the game a chance to reject this connection or modify the userinfo
 	denied = VM_Call( gvm, 3, GAME_CLIENT_CONNECT, clientNum, qtrue, qfalse ); // firstTime = qtrue
 	if ( denied ) {
@@ -2175,9 +2181,6 @@ static qboolean SV_ClientCommand( client_t *cl, msg_t *msg ) {
 }
 
 
-//==================================================================================
-
-
 /*
 ==================
 SV_ClientThink
@@ -2192,6 +2195,7 @@ void SV_ClientThink (client_t *cl, usercmd_t *cmd) {
 		return;		// may have been kicked during the last usercmd
 	}
 
+	SVM_ClientThink(cl);
 	VM_Call( gvm, 1, GAME_CLIENT_THINK, cl - svs.clients );
 }
 

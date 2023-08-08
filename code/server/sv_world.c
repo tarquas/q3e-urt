@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // world.c -- world query functions
 
 #include "server.h"
+#include "../qcommon/math3d.h"
 
 /*
 ================
@@ -643,6 +644,30 @@ void SV_Trace( trace_t *results, const vec3_t start, const vec3_t mins, const ve
 	*results = clip.trace;
 }
 
+
+/*
+==================
+SV_TraceAtCrosshair
+==================
+*/
+void SV_TraceAtCrosshair( trace_t *results, playerState_t *ps, const vec3_t mins, const vec3_t maxs, int contentmask, qboolean capsule ) {
+	vec3_t            vector;
+	vec_t             *pvec;
+	struct vec        epos, pos, ang;
+	struct quat       qang;
+
+	pvec = (vec_t *) &ps->viewangles;
+	ang = mkvec(radians(pvec[2]), radians(pvec[0]), radians(pvec[1]));
+	qang = rpy2quat(ang);
+	pos = mkvec(4000.0f, 0.0f, 0.0f);
+	epos = qvrot(qang, pos);
+	memcpy(vector, ps->origin, sizeof(vector));
+	vector[2] += ps->viewheight;
+	epos.x += vector[0];
+	epos.y += vector[1];
+	epos.z += vector[2];
+	SV_Trace(results, vector, mins, maxs, *(vec3_t *) &epos, ENTITYNUM_NONE, contentmask, capsule);
+}
 
 
 /*

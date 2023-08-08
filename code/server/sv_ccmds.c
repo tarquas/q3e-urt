@@ -1688,7 +1688,7 @@ static void SV_NameServerDemo(char *filename, int length, const client_t *client
 
 static void SV_StartRecordOne(client_t *client, char *filename) {
 
-    char demoName[ MAX_QPATH ];
+    char demoName[ MAX_OSPATH ];
 
     char path[MAX_OSPATH];
 

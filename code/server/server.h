@@ -480,6 +480,15 @@ void SV_SetTargetClient( int clientNum );
 #endif // USE_MV
 
 //
+// sv_mod.c
+//
+void SVM_Init( void );
+int* SVM_ItemFind(playerState_t *ps, long itemsMask);
+int* SVM_WeaponFind(playerState_t *ps, long weaponsMask);
+void SVM_ClientThink(client_t *cl);
+char* SVM_ClientConnect(client_t *cl);
+
+//
 // sv_ccmds.c
 //
 void SV_Heartbeat_f( void );
@@ -590,6 +599,7 @@ void SV_Trace( trace_t *results, const vec3_t start, const vec3_t mins, const ve
 
 // passEntityNum is explicitly excluded from clipping checks (normally ENTITYNUM_NONE)
 
+void SV_TraceAtCrosshair( trace_t *results, playerState_t *ps, const vec3_t mins, const vec3_t maxs, int contentmask, qboolean capsule );
 
 void SV_ClipToEntity( trace_t *trace, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int entityNum, int contentmask, qboolean capsule );
 // clip to a specific entity

@@ -105,6 +105,8 @@ cvar_t	*com_cameraMode;
 cvar_t	*com_noErrorInterrupt;
 #endif
 
+cvar_t	*sv_shutdown_message;
+
 // com_speeds times
 int		time_game;
 int		time_frontend;		// renderer frontend time
@@ -407,6 +409,31 @@ void QDECL Com_Error( errorParm_t code, const char *fmt, ... ) {
 	Sys_Error( "%s", com_errorMessage );
 }
 
+/*
+=============
+unescape_string
+
+parse string with some C escape sequences -- allow more characters to strings set from commandline
+=============
+*/
+void unescape_string(char *s) {
+	char *p = s, c;
+	for (; c = *s; ++s, ++p) {
+		if (c == '\\') {
+			++s;
+			switch (*s) {
+				case 0: return;
+				case '\\': *p = '\\'; break;
+				case 'r': *p = '\r'; break;
+				case 'n': *p = '\n'; break;
+				case 't': *p = '\t'; break;
+				case 'q': case '\"': *p = '\"'; break;
+			}
+		} else if (p != s) *p = *s;
+	}
+	if (p != s) *p = *s;
+}
+
 
 /*
 =============
@@ -418,6 +445,12 @@ do the appropriate things.
 */
 void Com_Quit_f( void ) {
 	const char *p = Cmd_ArgsFrom( 1 );
+
+	if (!*p) {
+		p = sv_shutdown_message->string;
+	}
+	unescape_string((char *) p);
+
 	// don't try to shutdown if we are in a recursive error
 	if ( !com_errorEntered ) {
 		// Some VMs might execute "quit" command directly,
@@ -3737,6 +3770,9 @@ void Com_Init( char *commandLine ) {
 
 #endif
 
+	sv_shutdown_message = Cvar_Get( "sv_shutdown_message", "", 0 );
+	Cvar_SetDescription(sv_shutdown_message, "Message for clients displayed on \"quit\" command by default\nDefault: \"\"");
+
 	if ( com_dedicated->integer ) {
 		if ( !com_viewlog->integer ) {
 			Cvar_Set( "viewlog", "1" );
@@ -3756,6 +3792,7 @@ void Com_Init( char *commandLine ) {
     }
 
 	Cmd_AddCommand( "quit", Com_Quit_f );
+	Cmd_AddCommand( "reboot", Com_Quit_f );
 	Cmd_AddCommand( "changeVectors", MSG_ReportChangeVectors_f );
 	Cmd_AddCommand( "writeconfig", Com_WriteConfig_f );
 	Cmd_SetCommandCompletionFunc( "writeconfig", Cmd_CompleteWriteCfgName );
