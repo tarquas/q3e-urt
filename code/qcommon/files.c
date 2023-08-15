@@ -223,8 +223,8 @@ static const unsigned pak_checksums[] = {
 // NOW defined in build files
 //#define PRE_RELEASE_TADEMO
 
-#define USE_PK3_CACHE
-#define USE_PK3_CACHE_FILE
+//#define USE_PK3_CACHE
+//#define USE_PK3_CACHE_FILE
 
 #define USE_HANDLE_CACHE
 #define MAX_CACHED_HANDLES 384
@@ -2376,6 +2376,65 @@ static void FS_ConvertFilename( char *name )
 	}
 }
 
+unsigned Fs_BlockChecksum(const void *buffer, int length, int pure) {
+	// int pure = *(int *)buffer == fs_checksumFeed;
+	char *name = 0;
+	int exists = 0;
+	char buf[CSUMHEX_MAXLEN], *p = buf;
+	unsigned char *b = (unsigned char *) buffer;
+	int i, c = CSUMHEX_MAXLEN, n = 0, v;
+
+	if (inMainDirAcquire) {
+		name = pure ? 0 : CSUMHEX_FILENAME_TMP;
+	} else {
+		if (fs_lastBuiltOsPath) {
+			snprintf(buf, c, "%s.crc", fs_lastBuiltOsPath);
+			name = buf;
+			exists = access(name, F_OK) != -1;
+		}
+	}
+
+	if (exists) {
+		Com_DPrintf("Minify PK3: Using checksum file: %s\n", name);
+		FILE *csumFile = fopen(name, "r");
+		b = (unsigned char *) p;
+
+		if (csumFile) {
+			if (pure) {
+				*(int *)p = *(int *) buffer;
+				p += sizeof(int);
+				b += sizeof(int);
+			}
+
+			n = fread(p, 1, c, csumFile);
+			while (n && p[n - 1] < '0') n--;
+
+			for (i = 0; i < n; i += 2, b++, p += 2) {
+				sscanf(p, "%02x", &v);
+				*b = (unsigned char) v;
+			}
+
+			fclose(csumFile);
+		}
+
+		return Com_BlockChecksum(buf, (char *) b - buf);
+	}
+
+	if (name) {
+		Com_DPrintf("Minify PK3: Creating checksum file: %s\n", name);
+		if (pure) b += sizeof(int);
+		FILE *csumFile = fopen(name, "a+");
+		for (i = 0; i < length; i++, b++) snprintf(p += n, c -= n, "%02x%n", *b, &n);
+
+		if (csumFile) {
+			fprintf(csumFile, "%s\n", buf);
+			fclose(csumFile);
+		}
+	}
+
+	return Com_BlockChecksum(buffer, length);
+}
+
 
 #ifdef USE_PK3_CACHE
 
@@ -2690,65 +2749,6 @@ static qboolean FS_SavePackToFile( const pack_t *pak, FILE *f )
 	return qtrue;
 }
 
-
-unsigned Fs_BlockChecksum(const void *buffer, int length, int pure) {
-	// int pure = *(int *)buffer == fs_checksumFeed;
-	char *name = 0;
-	int exists = 0;
-	char buf[CSUMHEX_MAXLEN], *p = buf;
-	unsigned char *b = (unsigned char *) buffer;
-	int i, c = CSUMHEX_MAXLEN, n = 0, v;
-
-	if (inMainDirAcquire) {
-		name = pure ? 0 : CSUMHEX_FILENAME_TMP;
-	} else {
-		if (fs_lastBuiltOsPath) {
-			snprintf(buf, c, "%s.crc", fs_lastBuiltOsPath);
-			name = buf;
-			exists = access(name, F_OK) != -1;
-		}
-	}
-
-	if (exists) {
-		FILE *csumFile = fopen(name, "r");
-		b = (unsigned char *) p;
-
-		if (csumFile) {
-			if (pure) {
-				*(int *)p = *(int *) buffer;
-				p += sizeof(int);
-				b += sizeof(int);
-			}
-
-			n = fread(p, 1, c, csumFile);
-			while (n && p[n - 1] < '0') n--;
-
-			for (i = 0; i < n; i += 2, b++, p += 2) {
-				sscanf(p, "%02x", &v);
-				*b = (unsigned char) v;
-			}
-
-			fclose(csumFile);
-		}
-
-		return Com_BlockChecksum(buf, (char *) b - buf);
-	}
-
-	if (name) {
-		if (pure) b += sizeof(int);
-		FILE *csumFile = fopen(name, "a+");
-		for (i = 0; i < length; i++, b++) snprintf(p += n, c -= n, "%02x%n", *b, &n);
-
-		if (csumFile) {
-			fprintf(csumFile, "%s\n", buf);
-			fclose(csumFile);
-		}
-	}
-
-	return Com_BlockChecksum(buffer, length);
-}
-
-
 static qboolean FS_LoadPakFromFile( FILE *f )
 {
 	fileTime_t ctime, mtime;
@@ -2923,10 +2923,10 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 	pack->checksumFeed = fs_checksumFeed;
 	pack->headerLongs[ 0 ] = LittleLong( fs_checksumFeed );
 
-	pack->checksum = Com_BlockChecksum( pack->headerLongs + 1, sizeof( pack->headerLongs[0] ) * ( pack->numHeaderLongs - 1 ) );
+	pack->checksum = Fs_BlockChecksum( pack->headerLongs + 1, sizeof( pack->headerLongs[0] ) * ( pack->numHeaderLongs - 1 ), 0 );
 	pack->checksum = LittleLong( pack->checksum );
 
-	pack->pure_checksum = Com_BlockChecksum( pack->headerLongs, sizeof( pack->headerLongs[0] ) * pack->numHeaderLongs );
+	pack->pure_checksum = Fs_BlockChecksum( pack->headerLongs, sizeof( pack->headerLongs[0] ) * pack->numHeaderLongs, 1 );
 	pack->pure_checksum = LittleLong( pack->pure_checksum );
 
 	// seek through unused content
@@ -3100,7 +3100,7 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 		if ( pack->checksumFeed != fs_checksumFeed )
 		{
 			pack->headerLongs[ 0 ] = LittleLong( fs_checksumFeed );
-			pack->pure_checksum = Com_BlockChecksum( pack->headerLongs, sizeof( pack->headerLongs[0] ) * pack->numHeaderLongs );
+			pack->pure_checksum = Fs_BlockChecksum( pack->headerLongs, sizeof( pack->headerLongs[0] ) * pack->numHeaderLongs, 1 );
 			pack->pure_checksum = LittleLong( pack->pure_checksum );
 			pack->checksumFeed = fs_checksumFeed;
 		}
@@ -4321,7 +4321,7 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 			}
 
 			// store the game name for downloading
-			pak->pakGamename = gamedir;
+			pak->pakGamename = fs_basegame->string;
 
 			pak->index = fs_packCount;
 			pak->referenced = 0;
@@ -5268,6 +5268,7 @@ const char *FS_LoadedPakNames( void ) {
 		s = Q_stradd( s, search->pack->pakBasename );
 	}
 
+	Q_stradd(s, " ");
 	AppendNames(info, 0);
 	return info;
 }
@@ -5433,6 +5434,7 @@ const char *FS_ReferencedPakNames( void ) {
 		}
 	}
 
+	Q_strcat( info, sizeof( info ), " " );
 	AppendNames(info, 1);
 	return info;
 }

@@ -25,6 +25,12 @@ typedef struct svm_player_s {
 
 static svm_player_t  svm_players[MAX_CLIENTS];
 
+cvar_t *sv_players_collision;
+#define COLLISION_ALL        0
+#define COLLISION_NO_LAMERS  1
+#define COLLISION_NO_TEAM    2
+#define COLLISION_NONE       3
+
 //==================================================================================
 
 int* SVM_ItemFind(playerState_t *ps, long itemsMask) {
@@ -65,13 +71,14 @@ void SVM_ClientThink(client_t *cl) {
 	sharedEntity_t    *oth;
 	playerState_t     *ps, *othps;
 	trace_t           trace;
-	int               isLame, w;
+	int               isLame, w, collision;
 
 	id = (int)(cl - svs.clients);
 
 	isLame = svm_players[id].isLame;
+	collision = sv_players_collision->integer;
 
-	if (!isLame && sv_gametype->integer != GT_UT_JUMP) return;
+	if (!isLame && collision == COLLISION_ALL && sv_gametype->integer != GT_UT_JUMP) return;
 
 	// for lamers and jump mode:
 
@@ -95,24 +102,27 @@ void SVM_ClientThink(client_t *cl) {
 
 		// on collision with other player:
 
-		if (isLame) {
+		if (isLame || collision > COLLISION_NO_LAMERS) {
 			othps = SV_GameClientNum(othid);
 			if (othps->pm_type == PM_DEAD) continue;  // no collision with dead players already
-			if (ps->persistant[PERS_TEAM] != othps->persistant[PERS_TEAM]) continue;  // ok to collide with enemy
-			if (svm_players[othid].isLame) continue;  // ok to collide with other lamers
-			cl->lastUsercmd.buttons &= ~BUTTON_ATTACK; // deny attacking
-			cl->lastUsercmd.upmove = UPMOVE_CROUCH; // deny jump not to bootkick; force crouch not to block the vision
+			if (collision < COLLISION_NONE && ps->persistant[PERS_TEAM] != othps->persistant[PERS_TEAM]) continue;  // ok to collide with enemy
 
-			if (
-				sv_gametype->integer == GT_UT_CTF &&
-				SVM_ItemFind(ps, (1 << ITEM_RED_FLAG) || (1 << ITEM_BLUE_FLAG))
-			) { // if holding the flag in CTF mode:
-				SV_ExecuteClientCommand(cl, "ut_itemdrop flag");  // drop the flag
-			} else if (
-				sv_gametype->integer != GT_UT_BOMB &&
-				SVM_WeaponFind(ps, (1 << WEAPON_BOMB))
-			) { // if holding the bomb in BOMB mode:
-				SV_ExecuteClientCommand(cl, "ut_itemdrop bomb");  // drop the bomb
+			if (isLame) {
+				if (svm_players[othid].isLame) continue;  // ok to collide with other lamers
+				cl->lastUsercmd.buttons &= ~BUTTON_ATTACK; // deny attacking
+				cl->lastUsercmd.upmove = UPMOVE_CROUCH; // deny jump not to bootkick; force crouch not to block the vision
+
+				if (
+					sv_gametype->integer == GT_UT_CTF &&
+					SVM_ItemFind(ps, (1 << ITEM_RED_FLAG) || (1 << ITEM_BLUE_FLAG))
+				) { // if holding the flag in CTF mode:
+					SV_ExecuteClientCommand(cl, "ut_itemdrop flag");  // drop the flag
+				} else if (
+					sv_gametype->integer != GT_UT_BOMB &&
+					SVM_WeaponFind(ps, (1 << WEAPON_BOMB))
+				) { // if holding the bomb in BOMB mode:
+					SV_ExecuteClientCommand(cl, "ut_itemdrop bomb");  // drop the bomb
+				}
 			}
 		}
 
@@ -122,9 +132,11 @@ void SVM_ClientThink(client_t *cl) {
 		return;
 	}
 
-	// unghost if no collisions:
-	ent->r.contents &= ~CONTENTS_CORPSE;
-	ent->r.contents |= CONTENTS_BODY;
+	if (ps->pm_type != PM_DEAD) {
+		// unghost if no collisions:
+		ent->r.contents &= ~CONTENTS_CORPSE;
+		ent->r.contents |= CONTENTS_BODY;
+	}
 
 	if (isLame && cl->lastUsercmd.buttons & BUTTON_ATTACK) { // if lamer attacking:
 		w = cl->lastUsercmd.weapon;
@@ -200,6 +212,9 @@ static void SVM_SetLamer_f( void ) {
 //==================================================================================
 
 void SVM_Init( void ) {
+	sv_players_collision = Cvar_Get( "sv_players_collision", "1", CVAR_ARCHIVE );
+	Cvar_SetDescription(sv_players_collision, "Disable collision for: 1=lamers only, 2=team allies, 3=all players");
+
 	Cmd_AddCommand(     "setlamer", SVM_SetLamer_f );
 	Cmd_SetDescription( "setlamer", "Define if player is a lamer\nusage: setlamer <player> <0|1>" );
 }

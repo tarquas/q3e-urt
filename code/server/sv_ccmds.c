@@ -178,7 +178,7 @@ static void SV_Map_f( void ) {
 
 	// force latched values to get set
 	Cvar_Get ("g_gametype", "0", CVAR_SERVERINFO | CVAR_USERINFO | CVAR_LATCH );
-	Cvar_Get("sv_matchId", "0", CVAR_SERVERINFO | CVAR_USERINFO | CVAR_INIT | CVAR_PROTECTED);
+	Cvar_Get("sv_matchId", "0", CVAR_USERINFO | CVAR_INIT | CVAR_PROTECTED); //OPT: CVAR_SERVERINFO disabled
 
 	cmd = Cmd_Argv(0);
 	if( Q_stricmpn( cmd, "sp", 2 ) == 0 ) {
@@ -387,6 +387,7 @@ Kick a user off of the server  FIXME: move to game
 static void SV_Kick_f( void ) {
 	client_t	*cl;
 	int			i;
+	char *reason, buf[1024];
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
@@ -394,8 +395,8 @@ static void SV_Kick_f( void ) {
 		return;
 	}
 
-	if ( Cmd_Argc() != 2 ) {
-		Com_Printf ("Usage: kick <player name>\nkick all = kick everyone\nkick allbots = kick all bots\n");
+	if ( Cmd_Argc() < 2 ) {
+		Com_Printf ("Usage: kick <player name> [<reason>]\nkick all = kick everyone\nkick allbots = kick all bots\n");
 		return;
 	}
 
@@ -432,8 +433,13 @@ static void SV_Kick_f( void ) {
 
 		return;
 	}
-
-	SV_DropClient( cl, "was kicked" );
+	if (Cmd_Argc() > 2) {
+		snprintf(buf, 1024, "was kicked: %s", Cmd_Argv(2));
+		reason = buf;
+	} else {
+		reason = "was kicked";
+	}
+	SV_DropClient( cl, reason );
 	cl->lastPacketTime = svs.time;	// in case there is a funny zombie
 }
 
@@ -843,7 +849,7 @@ static void SV_AddBanToList(qboolean isexception)
 		
 		if(curban->subnet <= mask)
 		{
-			if((curban->isexception || !isexception) && NET_CompareBaseAdrMask(&curban->ip, ip, &curban->subnet))
+			if((curban->isexception || !isexception) && NET_CompareBaseAdrMask(&curban->ip, &ip, curban->subnet))
 			{
 				Q_strncpyz(addy2, NET_AdrToString(&ip), sizeof(addy2));
 				
@@ -1267,7 +1273,7 @@ static void SV_ConSay_f( void ) {
 		return;
 	}
 
-	strcpy( text, "console: " );
+	strcpy( text, sv_sayprefix->string );
 	p = Cmd_ArgsFrom( 1 );
 
 	if ( strlen( p ) > 1000 ) {
@@ -1311,7 +1317,7 @@ static void SV_ConTell_f( void ) {
 		return;
 	}
 
-	strcpy( text, S_COLOR_MAGENTA "console: " );
+	strcpy( text, sv_tellprefix->string );
 	p = Cmd_ArgsFrom( 2 );
 
 	if ( strlen( p ) > 1000 ) {
@@ -1744,7 +1750,7 @@ static void SV_StartRecordAll(void) {
     }
 }
 
-static void SV_StopRecordOne(client_t *client) {
+void SV_StopRecordOne(client_t *client) {
 
     Com_DPrintf("SV_StopRecordOne\n");
 

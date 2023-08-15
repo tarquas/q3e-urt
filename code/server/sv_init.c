@@ -759,6 +759,11 @@ void SV_SpawnServer( const char *mapname, qboolean killBots ) {
 	Sys_SetStatus( "Running map %s", mapname );
 }
 
+cvar_t *sv_bad_password_message;
+cvar_t *sv_sayprefix;
+cvar_t *sv_tellprefix;
+cvar_t *g_teamnamered;
+cvar_t *g_teamnameblue;
 
 /*
 ===============
@@ -776,15 +781,18 @@ void SV_Init( void )
 	if ( com_dedicated->integer )
 		SV_AddDedicatedCommands();
 
+	Cvar_Get ("bot_minplayers", "0", 0); //OPT: added to disable CVAR_SERVERINFO
+
 	// serverinfo vars
-	Cvar_Get ("dmflags", "0", CVAR_SERVERINFO);
-	Cvar_Get ("fraglimit", "20", CVAR_SERVERINFO);
+	Cvar_Get ("auth_owners", "", CVAR_SERVERINFO);
+	Cvar_Get ("dmflags", "0", 0); //OPT: CVAR_SERVERINFO disabled
+	Cvar_Get ("fraglimit", "20", 0); //OPT: CVAR_SERVERINFO disabled
 	Cvar_Get ("timelimit", "0", CVAR_SERVERINFO);
 	sv_gametype = Cvar_Get ("g_gametype", "0", CVAR_SERVERINFO | CVAR_LATCH );
     Cvar_SetDescription(sv_gametype, "Holds the game style for the current match included in server info\nDefault: 0");
 
-    Cvar_Get ("sv_keywords", "", CVAR_SERVERINFO);
-    Cvar_SetDescription(Cvar_Get ("sv_keywords", "", CVAR_SERVERINFO),
+    Cvar_Get ("sv_keywords", "", 0); //OPT: CVAR_SERVERINFO disabled
+    Cvar_SetDescription(Cvar_Get ("sv_keywords", "", 0),
                         "Holds the search string entered in the internet connection menu\nDefault: empty");
 	Cvar_Get ("protocol", va("%i", PROTOCOL_VERSION), CVAR_SERVERINFO | CVAR_ROM);
     Cvar_SetDescription(Cvar_Get ("protocol", va("%i", PROTOCOL_VERSION), CVAR_SERVERINFO | CVAR_ROM),
@@ -792,7 +800,7 @@ void SV_Init( void )
 	sv_mapname = Cvar_Get ("mapname", "nomap", CVAR_SERVERINFO | CVAR_ROM);
     Cvar_SetDescription(sv_mapname, "Holds the name of the current map\nDefault: nomap");
 
-    sv_privateClients = Cvar_Get( "sv_privateClients", "0", CVAR_SERVERINFO );
+    sv_privateClients = Cvar_Get( "sv_privateClients", "0", 0 ); //OPT: CVAR_SERVERINFO disabled
     Cvar_SetDescription(sv_privateClients, "The number of spots, out of sv_maxclients, reserved for players with the server password\nDefault: 0");
 
     Cvar_CheckRange( sv_privateClients, "0", va( "%i", MAX_CLIENTS-1 ), CV_INTEGER );
@@ -813,8 +821,8 @@ void SV_Init( void )
     Cvar_SetDescription(sv_clientTLD, "Include client locations in status and demo recordings\nDefault: 0");
 
 #ifdef USE_MV
-    Cvar_Get( "mvproto", va( "%i", MV_PROTOCOL_VERSION ), CVAR_SERVERINFO | CVAR_ROM );
-    sv_autoRecord = Cvar_Get( "sv_mvAutoRecord", "0", CVAR_ARCHIVE | CVAR_SERVERINFO );
+    Cvar_Get( "mvproto", va( "%i", MV_PROTOCOL_VERSION ), CVAR_ROM ); //OPT: CVAR_SERVERINFO disabled
+    sv_autoRecord = Cvar_Get( "sv_mvAutoRecord", "0", CVAR_ARCHIVE ); //OPT: CVAR_SERVERINFO disabled
     Cvar_SetDescription(sv_autoRecord, "Automatically record a multiview demo\nDefault: 0");
 
     sv_demoFlags = Cvar_Get( "sv_mvFlags", "3", CVAR_ARCHIVE );
@@ -841,19 +849,19 @@ void SV_Init( void )
     SV_LoadRecordCache();
 #endif
 
-	sv_minRate = Cvar_Get ("sv_minRate", "0", CVAR_ARCHIVE_ND | CVAR_SERVERINFO );
+	sv_minRate = Cvar_Get ("sv_minRate", "0", CVAR_ARCHIVE_ND ); //OPT: CVAR_SERVERINFO disabled
     Cvar_SetDescription(sv_minRate, "Force clients to play with a minimum latency\nDefault: 0");
 
-    sv_maxRate = Cvar_Get ("sv_maxRate", "0", CVAR_ARCHIVE_ND | CVAR_SERVERINFO );
+    sv_maxRate = Cvar_Get ("sv_maxRate", "0", CVAR_ARCHIVE_ND ); //OPT: CVAR_SERVERINFO disabled
     Cvar_SetDescription(sv_maxRate, "Force all clients to play with a max rate, limit an advantage for having a low latency\nDefault: 0");
 
-    sv_minPing = Cvar_Get("sv_minPing", "0", CVAR_ARCHIVE | CVAR_SERVERINFO);
-	sv_maxPing = Cvar_Get("sv_maxPing", "0", CVAR_ARCHIVE | CVAR_SERVERINFO);
+    sv_minPing = Cvar_Get("sv_minPing", "0", CVAR_ARCHIVE ); //OPT: CVAR_SERVERINFO disabled
+	sv_maxPing = Cvar_Get("sv_maxPing", "0", CVAR_ARCHIVE ); //OPT: CVAR_SERVERINFO disabled
 
-	sv_dlRate = Cvar_Get("sv_dlRate", "100", CVAR_ARCHIVE | CVAR_SERVERINFO);
+	sv_dlRate = Cvar_Get("sv_dlRate", "100", CVAR_ARCHIVE ); //OPT: CVAR_SERVERINFO disabled
     Cvar_SetDescription(sv_dlRate, "Set the maximum rate for server downloads\nDefault: 100");
 
-    sv_floodProtect = Cvar_Get ("sv_floodProtect", "1", CVAR_ARCHIVE | CVAR_SERVERINFO );
+    sv_floodProtect = Cvar_Get ("sv_floodProtect", "1", CVAR_ARCHIVE ); //OPT: CVAR_SERVERINFO disabled
     Cvar_SetDescription( sv_floodProtect, "Toggle server flood protection to keep players from bringing the server down\nDefault: 1" );
 
     // systeminfo
@@ -889,7 +897,7 @@ void SV_Init( void )
 	Cvar_SetDescription( sv_zombietime, "Seconds to sink messages after disconnect" );
 	Cvar_Get ("nextmap", "", CVAR_TEMP );
 
-	sv_allowDownload = Cvar_Get ("sv_allowDownload", "1", CVAR_SERVERINFO);
+	sv_allowDownload = Cvar_Get ("sv_allowDownload", "1", 0); //OPT: CVAR_SERVERINFO disabled
     Cvar_SetDescription( sv_allowDownload, "Toggle the ability for clients to download files maps from server\nDefault: 1" );
 
     Cvar_Get ("sv_dlURL", "", CVAR_SERVERINFO | CVAR_ARCHIVE);
@@ -933,7 +941,7 @@ void SV_Init( void )
 
 #ifdef USE_BANS
 	sv_banFile = Cvar_Get("sv_banFile", "serverbans.dat", CVAR_ARCHIVE);
-    Cvar_SetDescription("Set the file to store a cache of all the player bans\nDefault: serverbans.dat");
+    Cvar_SetDescription(sv_banFile, "Set the file to store a cache of all the player bans\nDefault: serverbans.dat");
 #endif
 
 	sv_levelTimeReset = Cvar_Get( "sv_levelTimeReset", "0", CVAR_ARCHIVE_ND );
@@ -944,6 +952,18 @@ void SV_Init( void )
 
 	sv_bad_password_message = Cvar_Get( "sv_bad_password_message", "Invalid password", CVAR_ARCHIVE );
 	Cvar_SetDescription(sv_bad_password_message, "Send this message when client tries connecting with invalid password\nDefault: Invalid password");
+
+	sv_sayprefix = Cvar_Get( "sv_sayprefix", "console:", CVAR_ARCHIVE );
+	Cvar_SetDescription(sv_sayprefix, "Prefix for say command from server\nDefault: console:");
+
+	sv_tellprefix = Cvar_Get( "sv_tellprefix", "console_tell:", CVAR_ARCHIVE );
+	Cvar_SetDescription(sv_tellprefix, "Prefix for tell command from server\nDefault: console_tell:");
+
+	g_teamnamered = Cvar_Get( "g_teamnamered", "", CVAR_ARCHIVE | CVAR_SERVERINFO );
+	Cvar_SetDescription(g_teamnamered, "Custom name for red team");
+
+	g_teamnameblue = Cvar_Get( "g_teamnameblue", "", CVAR_ARCHIVE | CVAR_SERVERINFO );
+	Cvar_SetDescription(g_teamnameblue, "Custom name for blue team");
 
     // initialize bot cvars so they are listed and can be set before loading the botlib
 	SV_BotInitCvars();

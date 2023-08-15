@@ -27,6 +27,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../game/g_public.h"
 #include "../game/bg_public.h"
 
+#define USE_BANS
+#define STANDALONE
+
 //=============================================================================
 
 #define	PERS_SCORE				0		// !!! MUST NOT CHANGE, SERVER AND
@@ -408,6 +411,10 @@ extern  cvar_t  *sv_demofolder;
 #endif
 
 extern	cvar_t	*sv_bad_password_message;
+extern	cvar_t	*sv_sayprefix;
+extern	cvar_t	*sv_tellprefix;
+extern	cvar_t	*g_teamnamered;
+extern	cvar_t	*g_teamnameblue;
 
 //===========================================================
 

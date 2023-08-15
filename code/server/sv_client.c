@@ -416,8 +416,6 @@ static const char *SV_FindCountry( const char *tld ) {
 	return "Unknown Location";
 }
 
-cvar_t *sv_bad_password_message;
-
 /*
 ==================
 SV_DirectConnect
@@ -449,7 +447,7 @@ void SV_DirectConnect( const netadr_t *from ) {
 	// Check whether this client is banned.
 	if(SV_IsBanned(from, qfalse))
 	{
-		NET_OutOfBandPrint(NS_SERVER, &from, "print\nYou are banned from this server.\n");
+		NET_OutOfBandPrint(NS_SERVER, from, "print\nYou are banned from this server.\n");
 		return;
 	}
 #endif
@@ -813,6 +811,7 @@ void SV_FreeClient(client_t *client)
 	SV_CloseDownload(client);
 }
 
+void SV_StopRecordOne(client_t *client);
 
 /*
 =====================
@@ -827,6 +826,11 @@ void SV_DropClient( client_t *drop, const char *reason ) {
 	char	name[ MAX_NAME_LENGTH ];
 	qboolean isBot;
 	int		i;
+
+#ifdef USE_SERVER_DEMO
+	// stop the server side demo if we were recording this client
+	if (drop->demo_recording) SV_StopRecordOne(drop);
+#endif
 
 	if ( drop->state == CS_ZOMBIE ) {
 		return;		// already dropped
@@ -847,13 +851,6 @@ void SV_DropClient( client_t *drop, const char *reason ) {
 	if ( reason ) {
 		SV_SendServerCommand( NULL, "print \"%s" S_COLOR_WHITE " %s\n\"", name, reason );
 	}
-
-#ifdef USE_SERVER_DEMO
-    if (drop->demo_recording) {
-	    // stop the server side demo if we were recording this client
-       Cbuf_ExecuteText(EXEC_NOW, va("stopserverdemo %d", (int)(drop - svs.clients)));
-	}
-#endif
 
 	// call the prog function for removing a client
 	// this will remove the body, among other things
