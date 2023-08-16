@@ -716,7 +716,7 @@ Parse a CIDR notation type string and return a netadr_t and suffix by reference
 ==================
 */
 
-static qboolean SV_ParseCIDRNotation(netadr_t *dest, int *mask, char *adrstr)
+qboolean SV_ParseCIDRNotation(netadr_t *dest, int *mask, char *adrstr)
 {
 	char *suffix;
 	

@@ -4208,7 +4208,6 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 	const searchpath_t *sp;
 	int				len;
 	searchpath_t	*search;
-	const char		*gamedir;
 	pack_t			*pak;
 	char			curpath[MAX_OSPATH*2 + 1];
 	char			*pakfile;
@@ -4258,7 +4257,6 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 
 	strcpy( search->dir->path, path );
 	strcpy( search->dir->gamedir, dir );
-	gamedir = search->dir->gamedir;
 
 	search->next = fs_searchpaths;
 	fs_searchpaths = search;

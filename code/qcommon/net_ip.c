@@ -397,6 +397,7 @@ static qboolean Sys_StringToSockaddr( const char *s, sockaddr_t *sadr, int sadr_
 #ifdef USE_IPV6
 			if ( net_enabled->integer & NET_PRIOV6 )
 			{
+
 				if ( net_enabled->integer & NET_ENABLEV6 )
 					search = SearchAddrInfo( res, AF_INET6 );
 				

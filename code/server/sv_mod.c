@@ -25,11 +25,17 @@ typedef struct svm_player_s {
 
 static svm_player_t  svm_players[MAX_CLIENTS];
 
+cvar_t *auth;
+
 cvar_t *sv_players_collision;
 #define COLLISION_ALL        0
 #define COLLISION_NO_LAMERS  1
 #define COLLISION_NO_TEAM    2
 #define COLLISION_NONE       3
+
+cvar_t *sv_banned_subnets_file;
+cvar_t *sv_banned_subnet_message;
+svm_subnets_t bannedSubnets;
 
 //==================================================================================
 
@@ -166,6 +172,16 @@ void SVM_ClientThink(client_t *cl) {
 
 char* SVM_ClientConnect(client_t *cl) {
 	int id;
+	//char *value;
+
+	if (
+		// if auth works allow to play with it:
+		//TODO: !(auth->integer && (value = Info_ValueForKey(cl->userinfo, "authl")) && *value) ||
+
+		SVM_Subnets_FindByAdr(&bannedSubnets, &cl->netchan.remoteAddress)
+	) {
+		return unescape_string((char *) va("%s", sv_banned_subnet_message->string));
+	}
 
 	id = (int)(cl - svs.clients);
 	memset(&svm_players[id], 0, sizeof(svm_player_t));
@@ -208,13 +224,25 @@ static void SVM_SetLamer_f( void ) {
 	Com_Printf("player %s has lamer status %s\n", Cmd_Argv(1), set ? "set" : "unset");
 }
 
-
 //==================================================================================
 
 void SVM_Init( void ) {
+	auth = Cvar_Get( "auth", "", CVAR_ROM );
+
 	sv_players_collision = Cvar_Get( "sv_players_collision", "1", CVAR_ARCHIVE );
 	Cvar_SetDescription(sv_players_collision, "Disable collision for: 1=lamers only, 2=team allies, 3=all players");
 
 	Cmd_AddCommand(     "setlamer", SVM_SetLamer_f );
 	Cmd_SetDescription( "setlamer", "Define if player is a lamer\nusage: setlamer <player> <0|1>" );
+
+	sv_banned_subnets_file = Cvar_Get( "sv_banned_subnets_file", "banned-subnets.txt", CVAR_ARCHIVE );
+	Cvar_SetDescription(sv_banned_subnets_file, "File from gamedir with banned subnets, one in a line, format: N.N.N.N/N\nDefault: banned-subnets.txt");
+
+	sv_banned_subnet_message = Cvar_Get( "sv_banned_subnet_message", "Your subnet is banned.", CVAR_ARCHIVE );
+	Cvar_SetDescription(sv_banned_subnet_message, "Display this message when someone connects from a banned subnet\nDefault: Your subnet is banned.");
+
+	SVM_Subnets_Init(&bannedSubnets);
+	SVM_Subnets_AddFromFile(&bannedSubnets, sv_banned_subnets_file->string);
+	SVM_Subnets_Commit(&bannedSubnets);
+	Com_Printf("Subnet blocker: Retrieved %ld VPN subnets\n", bannedSubnets.count);
 }

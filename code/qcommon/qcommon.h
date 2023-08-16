@@ -1030,7 +1030,7 @@ void		Com_GameRestart( int checksumFeed, qboolean clientRestart );
 int			Com_EventLoop( void );
 int			Com_Milliseconds( void );	// will be journaled properly
 
-void unescape_string(char *s);
+char* unescape_string(char *s);
 
 // MD4 functions
 unsigned	Com_BlockChecksum( const void *buffer, int length );
@@ -1198,6 +1198,7 @@ void Com_TouchMemory( void );
 
 // commandLine should not include the executable name (argv[0])
 void Com_Init( char *commandLine );
+void Com_InitNet( void );
 void Com_Frame( qboolean noDelay );
 
 /*

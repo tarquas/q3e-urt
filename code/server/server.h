@@ -416,6 +416,10 @@ extern	cvar_t	*sv_tellprefix;
 extern	cvar_t	*g_teamnamered;
 extern	cvar_t	*g_teamnameblue;
 
+extern  cvar_t  *sv_hideChatCmd;
+extern	cvar_t	*sv_specChatGlobal;
+
+
 //===========================================================
 
 //
@@ -498,10 +502,38 @@ void SVM_ClientThink(client_t *cl);
 char* SVM_ClientConnect(client_t *cl);
 
 //
+// sv_subnets.c
+//
+#define SUBNETS_CHUNK_SIZE  1024
+
+typedef struct svm_subnets_s {
+	netadr_t  *start, *cur;
+	size_t    count;
+	size_t    cap;
+} svm_subnets_t;
+
+#define ERR_SVM_Subnets_SetFromString  1
+#define ERR_SVM_Subnets_Add            2
+
+void SVM_Subnets_Init(svm_subnets_t *subnets);
+netadr_t *SVM_Subnets_Add(svm_subnets_t *subnets);
+size_t SVM_Subnets_Remove(svm_subnets_t *subnets, netadr_t *adr);
+int SVM_Subnet_SetFromString(netadr_t *adr, char* string);
+int SVM_Subnets_AddFromString(svm_subnets_t *subnets, char* string);
+void SVM_Subnets_AddFromFile(svm_subnets_t *subnets, char *filename);
+void SVM_Subnets_Commit(svm_subnets_t *subnets);
+netadr_t *SVM_Subnets_FindByAdr(svm_subnets_t *subnets, netadr_t *adr);
+netadr_t *SVM_Subnets_FindByAdrString(svm_subnets_t *subnets, char* string);
+netadr_t *SVM_Subnets_FindByAdrUC(svm_subnets_t *subnets, netadr_t *adr);
+netadr_t *SVM_Subnets_FindByAdrStringUC(svm_subnets_t *subnets, char* string);
+void SVM_Subnets_Free(svm_subnets_t *subnets);
+
+//
 // sv_ccmds.c
 //
 void SV_Heartbeat_f( void );
 client_t *SV_GetPlayerByHandle( void );
+qboolean SV_ParseCIDRNotation(netadr_t *dest, int *mask, char *adrstr);
 
 #ifdef USE_SERVER_DEMO
 void SVD_WriteDemoFile(const client_t*, const msg_t*);

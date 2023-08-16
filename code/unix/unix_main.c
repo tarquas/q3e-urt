@@ -916,6 +916,7 @@ int main( int argc, const char* argv[] )
 
 	Com_Init( cmdline );
 	NET_Init();
+	Com_InitNet();
 
 	Com_Printf( "Working directory: %s\n", Sys_Pwd() );
 

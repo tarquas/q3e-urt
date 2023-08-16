@@ -416,13 +416,13 @@ unescape_string
 parse string with some C escape sequences -- allow more characters to strings set from commandline
 =============
 */
-void unescape_string(char *s) {
-	char *p = s, c;
+char* unescape_string(char *string) {
+	char *p = string, *s = string, c;
 	for (; (c = *s); ++s, ++p) {
 		if (c == '\\') {
 			++s;
 			switch (*s) {
-				case 0: return;
+				case 0: return string;
 				case '\\': *p = '\\'; break;
 				case 'r': *p = '\r'; break;
 				case 'n': *p = '\n'; break;
@@ -432,6 +432,7 @@ void unescape_string(char *s) {
 		} else if (p != s) *p = *s;
 	}
 	if (p != s) *p = *s;
+	return string;
 }
 
 
@@ -3876,6 +3877,11 @@ void Com_Init( char *commandLine ) {
 	Com_Printf( "--- Common Initialization Complete ---\n" );
 }
 
+void SVM_Init(void);
+
+void Com_InitNet( void ) {
+	SVM_Init();
+}
 
 //==================================================================
 

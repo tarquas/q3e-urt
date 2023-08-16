@@ -986,7 +986,6 @@ void SV_Init( void )
 	SV_TrackCvarChanges();
 
 	SV_InitChallenger();
-	SVM_Init();
 }
 
 
