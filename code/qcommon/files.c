@@ -391,6 +391,8 @@ static char    *fs_lastBuiltOsPath = 0;
 
 //======
 
+cvar_t *g_log;
+int g_log_fileHandle = -1;
 
 /*
 ==============
@@ -1210,6 +1212,9 @@ void FS_FCloseFile( fileHandle_t f ) {
 	}
 
 	Com_Memset( fd, 0, sizeof( *fd ) );
+	if (f == g_log_fileHandle) {
+		g_log_fileHandle = -1;
+	}
 }
 
 
@@ -1927,6 +1932,10 @@ int FS_Write( const void *buffer, int len, fileHandle_t h ) {
 
 	if ( !fs_searchpaths ) {
 		Com_Error( ERR_FATAL, "Filesystem call made without initialization" );
+	}
+
+	if (h == g_log_fileHandle && SVM_OnLogPrint(buffer, len)) {
+		return len;  // mod tells to ignore this item
 	}
 
 	//if ( h <= 0 || h >= MAX_FILE_HANDLES ) {
@@ -5626,6 +5635,8 @@ void FS_InitFilesystem( void ) {
 	fs_acquire_checksums = Cvar_Get( "fs_acquire_checksums", "0", 0 );
 	Cvar_SetDescription(fs_acquire_checksums, "Acquire and store the checksums for zUrT pk3 files\nDefault: \"0\"");
 
+	g_log = Cvar_Get( "g_log", "0", CVAR_ARCHIVE );
+
 	// try to start up normally
 	FS_Restart( 0 );
 }
@@ -5779,6 +5790,12 @@ int	FS_FOpenFileByMode( const char *qpath, fileHandle_t *f, fsMode_t mode ) {
 	fhd = &fsh[ *f ];
 
 	fhd->handleSync = sync;
+
+	if (!strcmp(qpath, g_log->string)) {
+		g_log_fileHandle = *f;
+	} else if (*f == g_log_fileHandle) {
+		g_log_fileHandle = -1;
+	}
 
 	return r;
 }

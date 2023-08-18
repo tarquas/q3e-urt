@@ -104,8 +104,10 @@ SV_SetConfigstring
 ===============
 */
 void SV_SetConfigstring (int index, const char *val) {
-	int		i;
+	int		i, id;
 	client_t	*client;
+	char	name[21], rest[1024], newVal[2048], *newName;
+	playerState_t *ps;
 
 	if ( index < 0 || index >= MAX_CONFIGSTRINGS ) {
 		Com_Error (ERR_DROP, "SV_SetConfigstring: bad index %i", index);
@@ -113,6 +115,26 @@ void SV_SetConfigstring (int index, const char *val) {
 
 	if ( !val ) {
 		val = "";
+	}
+
+	// sv_colourNames
+	if (
+		sv_colourNames->integer &&
+		index >= CS_URT_PLAYERS && index < CS_URT_PLAYERS + sv_maxclients->integer &&
+		sscanf(val, "n\\%20[^\\]\\%1023s", name, rest) == 2
+	) {
+		id = index - CS_URT_PLAYERS;
+		client = &svs.clients[id];
+		ps = SV_GameClientNum(id);
+		if (!client->isColourName) {
+			Q_strncpyz( client->plainName, name, sizeof( client->plainName ) );
+		}
+		newName = ps->pm_type == PM_DEAD ? client->plainName : client->colourName;
+		if (*newName) {
+			snprintf(newVal, sizeof(newVal), "n\\%s\\%s", newName, rest);
+			val = newVal;
+		}
+		client->isColourName = qtrue;
 	}
 
 	// don't bother broadcasting an update if no change
@@ -928,6 +950,16 @@ void SV_Init( void )
     Cvar_SetDescription( sv_lanForceRate, "Force clients to use the same packet rate as the server\nDefault: 1" );
 
     sv_strictAuth = Cvar_Get ( "sv_strictAuth", "1", CVAR_ARCHIVE );
+
+		sv_hideChatCmd = Cvar_Get("sv_hideChatCmd", "0", CVAR_ARCHIVE);
+    Cvar_SetDescription( sv_hideChatCmd, "Hide chat commands starting with '!', '@', '&', '/'?\nDefault: 0" );
+
+		sv_specChatGlobal = Cvar_Get ("sv_specChatGlobal", "0", CVAR_ARCHIVE );
+    Cvar_SetDescription( sv_specChatGlobal, "Spectator chat visible to everyone?\nDefault: 0" );
+
+		sv_colourNames = Cvar_Get ("sv_colourNames", "0", CVAR_ARCHIVE );
+    Cvar_SetDescription( sv_colourNames, "Display colour codes on player names?\nDefault: 0" );
+
 
 #ifdef USE_SERVER_DEMO
     sv_demonotice = Cvar_Get ( "sv_demonotice", "", CVAR_ARCHIVE );

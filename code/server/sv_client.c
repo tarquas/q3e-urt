@@ -737,9 +737,11 @@ gotnewcl:
 
 	if ((v = SVM_ClientConnect(newcl))) {
 		NET_OutOfBandPrint( NS_SERVER, from, "print\n%s\n", v );
-		Com_DPrintf( "Mod rejected a connection: %s.\n", v );
+		Com_DPrintf( "SVMod rejected a connection: %s.\n", v );
 		return;
 	}
+
+	newcl->isColourName = qfalse;
 
 	// get the game a chance to reject this connection or modify the userinfo
 	denied = VM_Call( gvm, 3, GAME_CLIENT_CONNECT, clientNum, qtrue, qfalse ); // firstTime = qtrue
@@ -1835,6 +1837,8 @@ void SV_UserinfoChanged( client_t *cl, qboolean updateUserinfo, qboolean runFilt
 
 	// name for C code
 	val = Info_ValueForKey( cl->userinfo, "name" );
+	Q_strncpyz( cl->colourName, val, sizeof( cl->colourName ) ); //TODO: clientID
+
 	// truncate if it is too long as it may cause memory corruption in OSP mod
 	if ( gvm->forceDataMask && strlen( val ) >= sizeof( buf ) ) {
 		Q_strncpyz( buf, val, sizeof( buf ) );
@@ -1950,6 +1954,7 @@ static void SV_UpdateUserinfo_f( client_t *cl ) {
 
 	SV_UserinfoChanged( cl, qtrue, qtrue ); // update userinfo, run filter
 	// call prog code to allow overrides
+	cl->isColourName = qfalse;
 	VM_Call( gvm, 1, GAME_CLIENT_USERINFO_CHANGED, cl - svs.clients );
 }
 
@@ -2079,8 +2084,10 @@ Also called by bot code
 ==================
 */
 qboolean SV_ExecuteClientCommand( client_t *cl, const char *s ) {
-	const ucmd_t *ucmd;
-	qboolean bFloodProtect;
+	const     ucmd_t *ucmd;
+	qboolean  bFloodProtect;
+	char      *p, c;
+	char      name[MAX_NAME_LENGTH];
 
 	Cmd_TokenizeString( s );
 
@@ -2113,10 +2120,11 @@ qboolean SV_ExecuteClientCommand( client_t *cl, const char *s ) {
 	}
 
 #ifndef DEDICATED
-	if ( !com_cl_running->integer && bFloodProtect && SV_FloodProtect( cl ) ) {
+	if ( !com_cl_running->integer && bFloodProtect && SV_FloodProtect( cl ) )
 #else
-	if ( bFloodProtect && SV_FloodProtect( cl ) ) {
+	if ( bFloodProtect && SV_FloodProtect( cl ) )
 #endif
+	{
 		// ignore any other text messages from this client but let them keep playing
 		Com_DPrintf( "client text ignored for %s: %s\n", cl->name, Cmd_Argv(0) );
 	} else {
@@ -2126,6 +2134,32 @@ qboolean SV_ExecuteClientCommand( client_t *cl, const char *s ) {
 				Cmd_Args_Sanitize( "\n\r;" ); // handle ';' for OSP
 			else
 				Cmd_Args_Sanitize( "\n\r" );
+
+			// TODO: // move out
+			if (Q_stricmp("say", Cmd_Argv(0)) == 0 || Q_stricmp("say_team", Cmd_Argv(0)) == 0) {
+				if (sv_hideChatCmd->integer > 0) {
+					// check for a BOT (b3 or w/e) command to be issued
+					// if a match is found the text string is hidden to
+					// everyone but the client who issued it
+					p = Cmd_Argv(1);
+					while (*p == ' ') {
+						p++;
+					}
+
+					// matching BOT prefixes (most common ones)
+					c = *p;
+					if ((c == '!') || (c == '@') || (c == '&') || (c == '/')) {
+							Q_strncpyz(name, cl->name, sizeof(name));
+							Q_CleanStr(name);
+							SV_LogPrintf("say: %d %s: %s\n", cl - svs.clients, name, Cmd_ArgsFrom(1));
+							SV_SendServerCommand(cl, "chat \"^8[^7hidden^8] ^7%s^7: ^8%s\n\"",
+								Info_ValueForKey(cl->userinfo, "name"), Cmd_ArgsFrom(1));
+							return qtrue;
+					}
+				}
+				sv.lastSpecChat[0] = '\0';
+			}
+
 			VM_Call( gvm, 1, GAME_CLIENT_COMMAND, cl - svs.clients );
 #ifdef USE_MV
 			cl->multiview.lastSentTime = svs.time;

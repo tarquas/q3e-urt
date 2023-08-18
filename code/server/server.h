@@ -95,6 +95,8 @@ typedef struct {
 	int				time;
 
 	byte			baselineUsed[ MAX_GENTITIES ];
+
+	char				lastSpecChat[MAX_EDIT_LINE];
 } server_t;
 
 typedef struct {
@@ -175,7 +177,6 @@ struct leakyBucket_s {
 
 	leakyBucket_t *prev, *next;
 };
-
 
 typedef struct client_s {
 	clientState_t	state;
@@ -280,6 +281,9 @@ typedef struct client_s {
 	int		demo_deltas;	// how many delta frames did we let through so far?
 #endif
 
+	char plainName[MAX_NAME_LENGTH];
+	char colourName[MAX_NAME_LENGTH * 3];
+	qboolean isColourName;
 } client_t;
 
 //=============================================================================
@@ -418,6 +422,7 @@ extern	cvar_t	*g_teamnameblue;
 
 extern  cvar_t  *sv_hideChatCmd;
 extern	cvar_t	*sv_specChatGlobal;
+extern	cvar_t	*sv_colourNames;
 
 
 //===========================================================
@@ -495,11 +500,16 @@ void SV_SetTargetClient( int clientNum );
 //
 // sv_mod.c
 //
+#define CS_URT_PLAYERS  544
+
 void SVM_Init( void );
 int* SVM_ItemFind(playerState_t *ps, long itemsMask);
 int* SVM_WeaponFind(playerState_t *ps, long weaponsMask);
 void SVM_ClientThink(client_t *cl);
 char* SVM_ClientConnect(client_t *cl);
+void QDECL SV_LogPrintf(const char *fmt, ...);
+qboolean SVM_OnLogPrint(char *string, int len);
+char* SVM_OnGamePrint(char *string);
 
 //
 // sv_subnets.c

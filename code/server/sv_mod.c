@@ -226,6 +226,70 @@ static void SVM_SetLamer_f( void ) {
 
 //==================================================================================
 
+/**
+ * Log in the same file as the game module.
+ */
+void QDECL SV_LogPrintf(const char *fmt, ...) {
+	va_list argptr;
+	char buffer[MAX_STRING_CHARS];
+	int min, tens, sec;
+
+	sec  = sv.time / 1000;
+	min  = sec / 60;
+	sec -= min * 60;
+	tens = sec / 10;
+	sec -= tens * 10;
+
+	Com_sprintf(buffer, sizeof(buffer), "%3i:%i%i ", min, tens, sec);
+
+	va_start(argptr, fmt);
+	vsprintf(buffer + 7, fmt, argptr);
+	va_end(argptr);
+
+	if (g_log_fileHandle >= 0) {
+		FS_Write(buffer, strlen(buffer), g_log_fileHandle);
+	}
+}
+
+qboolean SVM_OnLogPrint(char *string, int len) {
+	Com_Printf("LOG: %s\n", string);
+	return 0;
+}
+
+char* SVM_OnGamePrint(char *string) {  // \n -terminated
+	uint32_t	pfx;
+	int				colourName_id, index;
+	int				colourNames;
+
+	pfx = * (uint32_t *) string;
+	#ifdef Q3_LITTLE_ENDIAN
+	pfx = __builtin_bswap32(pfx);
+	#endif
+
+	colourNames = sv_colourNames->integer;
+
+	switch (pfx) {
+		case 'Kill':
+			if (!colourNames || sscanf(string, "Kill: %*d %d ", &colourName_id) != 1) colourName_id = -1;
+			break;
+		case 'Clie':
+			if (!colourNames || sscanf(string, "Client%*5[^:]: %d", &colourName_id) != 1) colourName_id = -1;
+			break;
+		default:
+			colourName_id = -1;
+			break;
+	}
+
+	if (colourName_id >= 0) {
+		index = colourName_id + CS_URT_PLAYERS;
+		SV_SetConfigstring(index, sv.configstrings[index]);
+	}
+
+	return string;
+}
+
+//==================================================================================
+
 void SVM_Init( void ) {
 	auth = Cvar_Get( "auth", "", CVAR_ROM );
 

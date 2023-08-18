@@ -78,6 +78,10 @@ cvar_t  *sv_strictAuth;
 
 cvar_t *sv_levelTimeReset;
 cvar_t *sv_filter;
+cvar_t  *sv_hideChatCmd;
+cvar_t	*sv_specChatGlobal;		// whether to broadcast spec chat globally
+cvar_t	*sv_colourNames;
+
 
 #ifdef USE_AUTH
 cvar_t* sv_authServerIP;
@@ -204,7 +208,6 @@ void SV_AddServerCommand( client_t *client, const char *cmd ) {
 	Q_strncpyz( client->reliableCommands[ index ], cmd, sizeof( client->reliableCommands[ index ] ) );
 }
 
-
 /*
 =================
 SV_SendServerCommand
@@ -219,10 +222,21 @@ void QDECL SV_SendServerCommand( client_t *cl, const char *fmt, ... ) {
 	char		message[MAX_STRING_CHARS+128]; // slightly larger than allowed, to detect overflows
 	client_t	*client;
 	int			j, len;
-	
+
 	va_start( argptr, fmt );
 	len = Q_vsnprintf( message, sizeof( message ), fmt, argptr );
 	va_end( argptr );
+
+	// sv_specChatGlobal
+	if (sv_specChatGlobal->integer > 0 && cl != NULL) {
+		if (!Q_strncmp((char *) message, "cchat \"0\" \"(SPEC) ", 18)) {
+			if (!Q_strncmp((char *) message, sv.lastSpecChat, sizeof(sv.lastSpecChat) - 1)) {
+				return;
+			}
+			Q_strncpyz(sv.lastSpecChat, (char *) message, sizeof(sv.lastSpecChat));
+			cl = NULL;
+		}
+	}
 
 	if ( cl != NULL ) {
 		// outdated clients can't properly decode 1023-chars-long strings

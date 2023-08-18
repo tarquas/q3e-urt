@@ -374,9 +374,12 @@ The module is making a system call
 ====================
 */
 static intptr_t SV_GameSystemCalls( intptr_t *args ) {
+	char *arg;
 	switch( args[0] ) {
 	case G_PRINT:
-		Com_Printf( "%s", (const char*)VMA(1) );
+		arg = SVM_OnGamePrint((char*)VMA(1));
+		if (arg == 0) return 0;  // mod tells to ignore this item
+		Com_Printf( "%s", (const char*) arg );
 		return 0;
 	case G_ERROR:
 		Com_Error( ERR_DROP, "%s", (const char*)VMA(1) );
