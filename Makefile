@@ -246,7 +246,7 @@ ifeq ($(ARCH),aarch64)
   HAVE_VM_COMPILED = true
 endif
 
-BASE_CFLAGS =
+BASE_CFLAGS = -Wno-multichar
 
 ifeq ($(USE_SYSTEM_JPEG),1)
   BASE_CFLAGS += -DUSE_SYSTEM_JPEG

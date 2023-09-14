@@ -91,12 +91,15 @@ void SVM_Subnets_Init(svm_subnets_t *subnets) {
 
 netadr_t *SVM_Subnets_Add(svm_subnets_t *subnets) {
 	netadr_t *new_adr;
+	size_t count;
 
-	if (subnets->count >= subnets->cap) {
+	count = subnets->cur - subnets->start;
+
+	if (count >= subnets->cap) {
 		subnets->cap += SUBNETS_CHUNK_SIZE;
 		new_adr = (netadr_t *) realloc(subnets->start, subnets->cap * sizeof(netadr_t));
 		if (!new_adr) { subnets->cap -= SUBNETS_CHUNK_SIZE; return 0; }
-		subnets->cur = new_adr + subnets->count;
+		subnets->cur = new_adr + count;
 		subnets->start = new_adr;
 	}
 
@@ -105,8 +108,8 @@ netadr_t *SVM_Subnets_Add(svm_subnets_t *subnets) {
 }
 
 size_t SVM_Subnets_Remove(svm_subnets_t *subnets, netadr_t *adr) {  // adr must point inside subnets (found inside it)
-	netadr_t *last = subnets->start + subnets->count - 1;
-	*adr = *last;
+	netadr_t *last = subnets->cur - 1;
+	if (adr != last) *adr = *last;
 	--subnets->cur;
 	return --subnets->count;
 }
@@ -150,7 +153,9 @@ void SVM_Subnets_AddFromFile(svm_subnets_t *subnets, char *filename) {
 }
 
 void SVM_Subnets_Commit(svm_subnets_t *subnets) {
-	if (subnets->count) qsort(subnets->start, subnets->count, sizeof(netadr_t), subnets_compare);
+	if (!subnets->count) return;
+	// TODO: deduplicate if (count < cur - start)
+	qsort(subnets->start, subnets->count, sizeof(netadr_t), subnets_compare);
 }
 
 netadr_t *SVM_Subnets_FindByAdr(svm_subnets_t *subnets, netadr_t *adr) {
@@ -177,6 +182,25 @@ netadr_t *SVM_Subnets_FindByAdrStringUC(svm_subnets_t *subnets, char* string) {
 	netadr_t adr;
 	if (SVM_Subnet_SetFromString(&adr, string)) return 0;
 	return SVM_Subnets_FindByAdrUC(subnets, &adr);
+}
+
+size_t SVM_Subnets_RemoveNC(svm_subnets_t *subnets, netadr_t *adr) {  // remove by duplication, preserve order, no need to commit after
+	netadr_t *last, *s, *p;
+	last = subnets->cur - 1;
+	for (s = adr, p = s + 1; p <= last && !memcmp(p, s, sizeof(netadr_t)); ++p, ++s);  // find last duplicate
+	if (s == last) {  // if item is the last
+		++last;
+		do {
+			--s;
+			--last;
+			--subnets->cur;
+		} while (!memcmp(s, last, sizeof(netadr_t)));  // remove all duplicates
+	} else {
+		last = s + 1;
+		for (s = adr, p = s - 1; p >= subnets->start && !memcmp(p, s, sizeof(netadr_t)); --p, --s);  // find first duplicate
+		for (p = s; p < last; ++p) *p = *last; // latch all duplicates with subsequent item
+	}
+	return --subnets->count;
 }
 
 void SVM_Subnets_Free(svm_subnets_t *subnets) {

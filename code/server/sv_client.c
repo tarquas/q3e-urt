@@ -2086,8 +2086,6 @@ Also called by bot code
 qboolean SV_ExecuteClientCommand( client_t *cl, const char *s ) {
 	const     ucmd_t *ucmd;
 	qboolean  bFloodProtect;
-	char      *p, c;
-	char      name[MAX_NAME_LENGTH];
 
 	Cmd_TokenizeString( s );
 
@@ -2135,32 +2133,9 @@ qboolean SV_ExecuteClientCommand( client_t *cl, const char *s ) {
 			else
 				Cmd_Args_Sanitize( "\n\r" );
 
-			// TODO: // move out
-			if (Q_stricmp("say", Cmd_Argv(0)) == 0 || Q_stricmp("say_team", Cmd_Argv(0)) == 0) {
-				if (sv_hideChatCmd->integer > 0) {
-					// check for a BOT (b3 or w/e) command to be issued
-					// if a match is found the text string is hidden to
-					// everyone but the client who issued it
-					p = Cmd_Argv(1);
-					while (*p == ' ') {
-						p++;
-					}
-
-					// matching BOT prefixes (most common ones)
-					c = *p;
-					if ((c == '!') || (c == '@') || (c == '&') || (c == '/')) {
-							Q_strncpyz(name, cl->name, sizeof(name));
-							Q_CleanStr(name);
-							SV_LogPrintf("say: %d %s: %s\n", cl - svs.clients, name, Cmd_ArgsFrom(1));
-							SV_SendServerCommand(cl, "chat \"^8[^7hidden^8] ^7%s^7: ^8%s\n\"",
-								Info_ValueForKey(cl->userinfo, "name"), Cmd_ArgsFrom(1));
-							return qtrue;
-					}
-				}
-				sv.lastSpecChat[0] = '\0';
+			if (!SVM_OnClientCommand(cl, (char *) s)) {
+				VM_Call( gvm, 1, GAME_CLIENT_COMMAND, cl - svs.clients );
 			}
-
-			VM_Call( gvm, 1, GAME_CLIENT_COMMAND, cl - svs.clients );
 #ifdef USE_MV
 			cl->multiview.lastSentTime = svs.time;
 #endif

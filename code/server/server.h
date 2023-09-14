@@ -510,6 +510,8 @@ char* SVM_ClientConnect(client_t *cl);
 void QDECL SV_LogPrintf(const char *fmt, ...);
 qboolean SVM_OnLogPrint(char *string, int len);
 char* SVM_OnGamePrint(char *string);
+int SVM_OnClientCommand( client_t *cl, char *s );
+int SVM_OnServerCommand(client_t **pcl, char *message);
 
 //
 // sv_subnets.c
@@ -536,6 +538,7 @@ netadr_t *SVM_Subnets_FindByAdr(svm_subnets_t *subnets, netadr_t *adr);
 netadr_t *SVM_Subnets_FindByAdrString(svm_subnets_t *subnets, char* string);
 netadr_t *SVM_Subnets_FindByAdrUC(svm_subnets_t *subnets, netadr_t *adr);
 netadr_t *SVM_Subnets_FindByAdrStringUC(svm_subnets_t *subnets, char* string);
+size_t SVM_Subnets_RemoveNC(svm_subnets_t *subnets, netadr_t *adr);
 void SVM_Subnets_Free(svm_subnets_t *subnets);
 
 //

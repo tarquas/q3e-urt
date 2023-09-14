@@ -227,16 +227,7 @@ void QDECL SV_SendServerCommand( client_t *cl, const char *fmt, ... ) {
 	len = Q_vsnprintf( message, sizeof( message ), fmt, argptr );
 	va_end( argptr );
 
-	// sv_specChatGlobal
-	if (sv_specChatGlobal->integer > 0 && cl != NULL) {
-		if (!Q_strncmp((char *) message, "cchat \"0\" \"(SPEC) ", 18)) {
-			if (!Q_strncmp((char *) message, sv.lastSpecChat, sizeof(sv.lastSpecChat) - 1)) {
-				return;
-			}
-			Q_strncpyz(sv.lastSpecChat, (char *) message, sizeof(sv.lastSpecChat));
-			cl = NULL;
-		}
-	}
+	if (SVM_OnServerCommand(&cl, message)) return;
 
 	if ( cl != NULL ) {
 		// outdated clients can't properly decode 1023-chars-long strings

@@ -251,24 +251,21 @@ void QDECL SV_LogPrintf(const char *fmt, ...) {
 	}
 }
 
-qboolean SVM_OnLogPrint(char *string, int len) {
-	Com_Printf("LOG: %s\n", string);
-	return 0;
-}
-
-char* SVM_OnGamePrint(char *string) {  // \n -terminated
+uint32_t get_prefix4(char *string) {
 	uint32_t	pfx;
-	int				colourName_id, index;
-	int				colourNames;
-
 	pfx = * (uint32_t *) string;
 	#ifdef Q3_LITTLE_ENDIAN
 	pfx = __builtin_bswap32(pfx);
 	#endif
+	return pfx;
+}
+
+char* SVM_OnGamePrint(char *string) {  // \n -terminated
+	int colourName_id, colourNames, index;
 
 	colourNames = sv_colourNames->integer;
 
-	switch (pfx) {
+	switch (get_prefix4(string)) {
 		case 'Kill':
 			if (!colourNames || sscanf(string, "Kill: %*d %d ", &colourName_id) != 1) colourName_id = -1;
 			break;
@@ -286,6 +283,79 @@ char* SVM_OnGamePrint(char *string) {  // \n -terminated
 	}
 
 	return string;
+}
+
+qboolean SVM_OnLogPrint(char *string, int len) {
+	return 0;
+}
+
+static char bot_prefixes[] = "!@&/";
+static client_t *last_chat_client = 0;
+
+int SVM_OnClientCommand( client_t *cl, char *s ) {
+	char *p;
+
+	switch (get_prefix4(s)) {
+		case 'say_':
+			if (get_prefix4(s + 4) != 'team') break;
+		case 'say ':
+			if (sv_hideChatCmd->integer > 0) {
+				p = Cmd_Argv(1);
+				while (*p == ' ') ++p;
+				if (memchr(bot_prefixes, *p, sizeof(bot_prefixes) - 1)) {
+					SV_LogPrintf("say: %d %s: %s\n", cl - svs.clients, cl->plainName, p);
+					SV_SendServerCommand(cl, "chat \"^8[^7hidden^8] ^7%s^7: ^8%s\n\"", cl->colourName, p);
+					return 1;
+				}
+			}
+			last_chat_client = cl;
+			sv.lastSpecChat[0] = '\0';
+			break;
+		default:
+			break;
+	}
+
+	return 0;
+}
+
+static char spec_chat_prefix[] = "cchat \"0\" \"(SPEC) ";
+
+int SVM_OnServerCommand(client_t **pcl, char *message) {
+	int len1, len2, id;
+	char *p;
+
+	// Com_Printf("SVCMD: %s\n", message);
+
+	switch (get_prefix4(message)) {
+		case 'ccha':
+			// sv_specChatGlobal
+			if (sv_specChatGlobal->integer > 0 && *pcl != NULL) {
+				if (!Q_strncmp(message, spec_chat_prefix, sizeof(spec_chat_prefix) - 1)) {
+					if (!Q_strncmp(message, sv.lastSpecChat, sizeof(sv.lastSpecChat) - 1)) {
+						return 1;
+					}
+					Q_strncpyz(sv.lastSpecChat, (char *) message, sizeof(sv.lastSpecChat));
+					*pcl = NULL;
+				}
+			}
+		//case 'prin':
+		//case 'ccpr':
+		case 'tcch':
+			if (sv_colourNames->integer && last_chat_client) {
+				p = strstr(message, last_chat_client->plainName);
+				if (p) {
+					len1 = strlen(last_chat_client->plainName);
+					len2 = strlen(last_chat_client->colourName);
+					memmove(p + len2, p + len1, strlen(p + len1) + 1);
+					memcpy(p, last_chat_client->colourName, len2);
+				}
+			}
+			break;
+		default:
+			break;
+	}
+
+	return 0;
 }
 
 //==================================================================================
