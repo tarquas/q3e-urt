@@ -300,7 +300,7 @@ int SVM_OnClientCommand( client_t *cl, char *s ) {
 			if (get_prefix4(s + 4) != 'team') break;
 		case 'say ':
 			if (sv_hideChatCmd->integer > 0) {
-				p = Cmd_Argv(1);
+				p = Cmd_ArgsFrom(1);
 				while (*p == ' ') ++p;
 				if (memchr(bot_prefixes, *p, sizeof(bot_prefixes) - 1)) {
 					SV_LogPrintf("say: %d %s: %s\n", cl - svs.clients, cl->plainName, p);
