@@ -2204,8 +2204,9 @@ void SV_ClientThink (client_t *cl, usercmd_t *cmd) {
 		return;		// may have been kicked during the last usercmd
 	}
 
-	SVM_ClientThink(cl);
-	VM_Call( gvm, 1, GAME_CLIENT_THINK, cl - svs.clients );
+	if (!SVM_ClientThink(cl)) {
+    VM_Call( gvm, 1, GAME_CLIENT_THINK, cl - svs.clients );
+  }
 }
 
 

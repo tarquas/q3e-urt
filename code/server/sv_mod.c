@@ -21,6 +21,7 @@
 
 typedef struct svm_player_s {
 	char  isLame;  // is known lamer?
+	char  isPresenting;  // detached from QVM
 } svm_player_t;
 
 static svm_player_t  svm_players[MAX_CLIENTS];
@@ -65,7 +66,7 @@ int* SVM_WeaponFind(playerState_t *ps, long weaponsMask) {
 
 //==================================================================================
 
-void SVM_ClientThink(client_t *cl) {
+int SVM_ClientThink(client_t *cl) {
 	int               i, id, othid;
 	int               num;
 	int               touch[MAX_GENTITIES];
@@ -81,15 +82,19 @@ void SVM_ClientThink(client_t *cl) {
 
 	id = (int)(cl - svs.clients);
 
+	if (svm_players[id].isPresenting) {
+		if (SVMP_ClientThink(cl)) return 1;
+	}
+
 	isLame = svm_players[id].isLame;
 	collision = sv_players_collision->integer;
 
-	if (!isLame && collision == COLLISION_ALL && sv_gametype->integer != GT_UT_JUMP) return;
+	if (!isLame && collision == COLLISION_ALL && sv_gametype->integer != GT_UT_JUMP) return 0;
 
 	// for lamers and jump mode:
 
 	ps = SV_GameClientNum(id);
-	if (ps->persistant[PERS_TEAM] == TEAM_SPECTATOR) return;
+	if (ps->persistant[PERS_TEAM] == TEAM_SPECTATOR) return 0;
 
 	ent = SV_GentityNum((int)(cl - svs.clients));
 
@@ -124,7 +129,7 @@ void SVM_ClientThink(client_t *cl) {
 				) { // if holding the flag in CTF mode:
 					SV_ExecuteClientCommand(cl, "ut_itemdrop flag");  // drop the flag
 				} else if (
-					sv_gametype->integer != GT_UT_BOMB &&
+					sv_gametype->integer == GT_UT_BOMB &&
 					SVM_WeaponFind(ps, (1 << WEAPON_BOMB))
 				) { // if holding the bomb in BOMB mode:
 					SV_ExecuteClientCommand(cl, "ut_itemdrop bomb");  // drop the bomb
@@ -135,7 +140,7 @@ void SVM_ClientThink(client_t *cl) {
 		// make ghost
 		ent->r.contents &= ~CONTENTS_BODY;
 		ent->r.contents |= CONTENTS_CORPSE;
-		return;
+		return 0;
 	}
 
 	if (ps->pm_type != PM_DEAD) {
@@ -157,7 +162,7 @@ void SVM_ClientThink(client_t *cl) {
 
 		SV_TraceAtCrosshair(&trace, ps, tmins, tmaxs, CONTENTS_BODY, 0);
 		i = trace.entityNum;
-		if (i < 0 || i >= sv_maxclients->integer) return;
+		if (i < 0 || i >= sv_maxclients->integer) return 0;
 		othps = SV_GameClientNum(i);
 
 		if (ps->persistant[PERS_TEAM] != othps->persistant[PERS_TEAM]) {
@@ -166,6 +171,7 @@ void SVM_ClientThink(client_t *cl) {
 			cl->lastUsercmd.buttons &= ~BUTTON_ATTACK; // deny attacking ally
 		}
 	}
+	return 0;
 }
 
 //==================================================================================
@@ -222,6 +228,40 @@ static void SVM_SetLamer_f( void ) {
 	}
 
 	Com_Printf("player %s has lamer status %s\n", Cmd_Argv(1), set ? "set" : "unset");
+}
+
+static void SVM_SetPresent_f( void ) {
+	client_t  *cl;
+	int       id, set;
+
+	// make sure server is running
+	if ( !com_sv_running->integer ) {
+		Com_Printf( "Server is not running.\n" );
+		return;
+	}
+
+	if ( Cmd_Argc() < 2 ) {
+		Com_Printf ("Usage: setpresent <player name> [<0|1>]\n");
+		return;
+	}
+
+	cl = SV_GetPlayerByHandle();
+
+	if ( !cl ) {
+		Com_Printf ("Player not found: %s\n", Cmd_Argv(1));
+		return;
+	}
+
+	id = (int)(cl - svs.clients);
+
+	if (Cmd_Argc() == 3) {
+		set = atoi(Cmd_Argv(2)) != 0;
+		svm_players[id].isPresenting = set;
+	} else {
+		set = svm_players[id].isPresenting;
+	}
+
+	Com_Printf("player %s has presentation mode %s\n", Cmd_Argv(1), set ? "on" : "off");
 }
 
 //==================================================================================
@@ -321,7 +361,7 @@ int SVM_OnClientCommand( client_t *cl, char *s ) {
 static char spec_chat_prefix[] = "cchat \"0\" \"(SPEC) ";
 
 int SVM_OnServerCommand(client_t **pcl, char *message) {
-	int len1, len2, id;
+	int len1, len2;
 	char *p;
 
 	// Com_Printf("SVCMD: %s\n", message);
@@ -368,6 +408,9 @@ void SVM_Init( void ) {
 
 	Cmd_AddCommand(     "setlamer", SVM_SetLamer_f );
 	Cmd_SetDescription( "setlamer", "Define if player is a lamer\nusage: setlamer <player> <0|1>" );
+
+	Cmd_AddCommand(     "setpresent", SVM_SetPresent_f );
+	Cmd_SetDescription( "setpresent", "Set presentation mode for a player\nusage: setpresent <player> <0|1>" );
 
 	sv_banned_subnets_file = Cvar_Get( "sv_banned_subnets_file", "banned-subnets.txt", CVAR_ARCHIVE );
 	Cvar_SetDescription(sv_banned_subnets_file, "File from gamedir with banned subnets, one in a line, format: N.N.N.N/N\nDefault: banned-subnets.txt");

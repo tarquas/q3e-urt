@@ -2645,6 +2645,7 @@ static void FS_FreeUnusedCache( void )
 				fs_paksReleased++;
 #endif
 			}
+			if (pak == pakHashTable[ i ]) pakHashTable[ i ] = next;
 			pak = next;
 		}
 	}
