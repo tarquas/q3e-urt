@@ -2205,8 +2205,8 @@ void SV_ClientThink (client_t *cl, usercmd_t *cmd) {
 	}
 
 	if (!SVM_ClientThink(cl)) {
-    VM_Call( gvm, 1, GAME_CLIENT_THINK, cl - svs.clients );
-  }
+		VM_Call( gvm, 1, GAME_CLIENT_THINK, cl - svs.clients );
+	}
 }
 
 
