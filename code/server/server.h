@@ -509,7 +509,7 @@ int SVM_ClientThink(client_t *cl);
 int SVMP_ClientThink(client_t *cl);
 char* SVM_ClientConnect(client_t *cl);
 void QDECL SV_LogPrintf(const char *fmt, ...);
-qboolean SVM_OnLogPrint(char *string, int len);
+//qboolean SVM_OnLogPrint(char *string, int len);
 char* SVM_OnGamePrint(char *string);
 int SVM_OnClientCommand( client_t *cl, char *s );
 int SVM_OnServerCommand(client_t **pcl, char *message);
