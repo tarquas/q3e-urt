@@ -1,0 +1,18 @@
+services:
+  urt-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: urt-server
+    user: "${UID}:${GID}"
+    command: [ "/bin/bash", "-c", "bash ./server-run.sh" ]
+    ports:
+      - "27960:27960/udp"
+    volumes:
+      - ${PWD}:/usr/src/urt
+    networks:
+      - urt-network
+
+networks:
+  urt-network:
+    driver: bridge

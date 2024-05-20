@@ -38,6 +38,9 @@ cvar_t *sv_banned_subnets_file;
 cvar_t *sv_banned_subnet_message;
 svm_subnets_t bannedSubnets;
 
+cvar_t *sv_scoreThreshold;
+cvar_t *sv_minBalanceInterval;
+
 //==================================================================================
 
 int* SVM_ItemFind(playerState_t *ps, long itemsMask) {
@@ -301,27 +304,7 @@ uint32_t get_prefix4(char *string) {
 }
 
 char* SVM_OnGamePrint(char *string) {  // \n -terminated
-	int colourName_id, colourNames, index;
-
-	colourNames = sv_colourNames->integer;
-
-	switch (get_prefix4(string)) {
-		case 'Kill':
-			if (!colourNames || sscanf(string, "Kill: %*d %d ", &colourName_id) != 1) colourName_id = -1;
-			break;
-		case 'Clie':
-			if (!colourNames || sscanf(string, "Client%*5[^:]: %d", &colourName_id) != 1) colourName_id = -1;
-			break;
-		default:
-			colourName_id = -1;
-			break;
-	}
-
-	if (colourName_id >= 0) {
-		index = colourName_id + CS_URT_PLAYERS;
-		SV_SetConfigstring(index, sv.configstrings[index]);
-	}
-
+    handlePrintLine(string);
 	return string;
 }
 
@@ -422,4 +405,13 @@ void SVM_Init( void ) {
 	SVM_Subnets_AddFromFile(&bannedSubnets, sv_banned_subnets_file->string);
 	SVM_Subnets_Commit(&bannedSubnets);
 	Com_Printf("Subnet blocker: Retrieved %ld VPN subnets\n", bannedSubnets.count);
+
+    sv_scoreThreshold = Cvar_Get("sv_scoreThreshold", "5", CVAR_ARCHIVE);
+    Cvar_SetDescription(sv_scoreThreshold, "Score threshold to avoid shuffling if the score difference is within this range (expressed as percentages)");
+
+    sv_minBalanceInterval = Cvar_Get("sv_minBalanceInterval", "30", CVAR_ARCHIVE);
+    Cvar_SetDescription(sv_minBalanceInterval, "Minimum time in seconds between consecutive team balance operations");
+
+    Com_Printf("Score Threshold for team balance: %d%%\n", sv_scoreThreshold->integer);
+    Com_Printf("Minimum Balance Interval: %d seconds\n", sv_minBalanceInterval->integer);
 }

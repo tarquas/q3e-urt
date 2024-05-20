@@ -181,6 +181,9 @@ struct leakyBucket_s {
 typedef struct client_s {
 	clientState_t	state;
 	char			userinfo[MAX_INFO_STRING];		// name, etc
+    int             teamId;                         // ID of the team to which the client belongs
+    int             kills;                          // Number of kills the client has made
+    int             deaths;                         // Number of times the client has died
 
 	char			reliableCommands[MAX_RELIABLE_COMMANDS][MAX_STRING_CHARS];
 	int				reliableSequence;		// last added reliable message, not necessarily sent or acknowledged yet
@@ -424,6 +427,8 @@ extern  cvar_t  *sv_hideChatCmd;
 extern	cvar_t	*sv_specChatGlobal;
 extern	cvar_t	*sv_colourNames;
 
+extern cvar_t *sv_scoreThreshold;
+extern cvar_t *sv_minBalanceInterval;
 
 //===========================================================
 
@@ -513,6 +518,11 @@ void QDECL SV_LogPrintf(const char *fmt, ...);
 char* SVM_OnGamePrint(char *string);
 int SVM_OnClientCommand( client_t *cl, char *s );
 int SVM_OnServerCommand(client_t **pcl, char *message);
+
+//
+// sv_mod_parse.c
+//
+void handlePrintLine(char *string);
 
 //
 // sv_subnets.c

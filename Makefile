@@ -1144,6 +1144,7 @@ $(B)/$(TARGET_RENDV): $(Q3RENDVOBJ)
 Q3DOBJ = \
   $(B)/ded/sv_bot.o \
   $(B)/ded/sv_client.o \
+  $(B)/ded/sv_mod_print.o \
   $(B)/ded/sv_mod.o \
   $(B)/ded/sv_mod_present.o \
   $(B)/ded/sv_mod_subnets.o \
@@ -1331,9 +1332,72 @@ $(B)/ded/%.o: $(W32DIR)/%.c
 $(B)/ded/%.o: $(W32DIR)/%.rc
 	$(DO_WINDRES)
 
+PROJECT_DIR := $(PWD)
+UID := $(shell id -u)
+GID := $(shell id -g)
+DOCKER_COMPOSE_CMD := UID=$(UID) GID=$(GID) docker-compose -f $(PROJECT_DIR)/docker-compose.yml
+
 #############################################################################
 # MISC
 #############################################################################
+
+.PHONY: create_data_dirs
+create_data_dirs:
+	@mkdir -p build/release-linux-x86_64/client 2>/dev/null || true
+	@mkdir -p build/release-linux-x86_64/ded 2>/dev/null || true
+	@mkdir -p build/release-linux-x86_64/rend1 2>/dev/null || true
+	@mkdir -p build/release-linux-x86_64/rend2/glsl 2>/dev/null || true
+	@mkdir -p build/release-linux-x86_64/rendv 2>/dev/null || true
+	@mkdir -p build/release-linux-x86_64/tools 2>/dev/null || true
+
+.PHONY: build-server
+build-server: create_data_dirs
+	@echo "Building the Docker images and project..."
+	@$(DOCKER_COMPOSE_CMD) build
+
+.PHONY: run-server
+run-server: build-server
+	@echo "Starting the Urban Terror server..."
+	@$(DOCKER_COMPOSE_CMD) up -d urt-server
+	@echo "Urban Terror server is running."
+
+.PHONY: run-server-interactive
+run-server-interactive: build-server
+	@echo "Starting and attaching to the Urban Terror server interactively..."
+	@$(DOCKER_COMPOSE_CMD) run urt-server
+
+.PHONY: shell-server
+shell-server:
+	@echo "Accessing interactive shell of the Urban Terror server..."
+	@docker exec -it urt-server /bin/bash
+
+.PHONY: logs-server
+logs-server:
+	@echo "Displaying logs for the Urban Terror server..."
+	@$(DOCKER_COMPOSE_CMD) logs -f urt-server
+
+.PHONY: shutdown-server
+shutdown-server:
+	@echo "Shutting down all services..."
+	@$(DOCKER_COMPOSE_CMD) down
+
+.PHONY: clean-server
+clean-server:
+	@echo "Cleaning up Docker volumes..."
+	@$(DOCKER_COMPOSE_CMD) down -v
+
+.PHONY: start-server
+start-server: run-server
+
+.PHONY: stop-server
+stop-server:
+	@echo "Stopping the Urban Terror server..."
+	@$(DOCKER_COMPOSE_CMD) stop urt-server
+
+.PHONY: restart-server
+restart-server:
+	@echo "Restarting the Urban Terror server..."
+	@$(DOCKER_COMPOSE_CMD) restart urt-server
 
 install: release
 	@for i in $(TARGETS); do \
