@@ -406,7 +406,7 @@ void SVM_Init( void ) {
 	SVM_Subnets_Commit(&bannedSubnets);
 	Com_Printf("Subnet blocker: Retrieved %ld VPN subnets\n", bannedSubnets.count);
 
-    sv_scoreThreshold = Cvar_Get("sv_scoreThreshold", "5", CVAR_ARCHIVE);
+    sv_scoreThreshold = Cvar_Get("sv_scoreThreshold", "10", CVAR_ARCHIVE);
     Cvar_SetDescription(sv_scoreThreshold, "Score threshold to avoid shuffling if the score difference is within this range (expressed as percentages)");
 
     sv_minBalanceInterval = Cvar_Get("sv_minBalanceInterval", "30", CVAR_ARCHIVE);
