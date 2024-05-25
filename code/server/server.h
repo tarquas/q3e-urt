@@ -520,7 +520,7 @@ int SVM_OnClientCommand( client_t *cl, char *s );
 int SVM_OnServerCommand(client_t **pcl, char *message);
 
 //
-// sv_mod_parse.c
+// sv_mod_print.c
 //
 void handlePrintLine(char *string);
 

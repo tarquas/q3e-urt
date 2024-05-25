@@ -1,8 +1,9 @@
 #include "server.h"
 #include <stdatomic.h>
+#include <stdbool.h>
 
 const char *globalPlayerNameKey = "name";
-const int maxScore = 1000;
+const char *globalPlayerTeamNameKey = "team";
 
 static int lastBalanceTime = 0;
 static atomic_flag balanceTeamsFlag = ATOMIC_FLAG_INIT;
@@ -20,7 +21,13 @@ typedef struct {
     int deaths;
     int score;
     int teamId;
-} player_info_t;
+    int newTeamId;
+} PlayerInfo;
+
+typedef enum {
+    SCORE_KILLS,
+    SCORE_DEATHS
+} ScoreFieldType;
 
 void handleUserinfoChanged(const char *line);
 
@@ -35,16 +42,19 @@ ActionMap options[] = {
         {NULL, NULL},
 };
 
-void updatePlayerScore(client_t *client, int *scoreField, int increment);
+int tokenizeUserinfoString(char *str, char *tokens[], int maxTokens);
+
+void updatePlayerScore(client_t *client, ScoreFieldType field, int increment);
 
 void balanceTeams(void);
 
-void findOptimalSwap(player_info_t *players, int numPlayers, int team1Id, int team2Id,
-                     int *bestPlayer1Index, int *bestPlayer2Index);
+void equalizeTeamSizes(PlayerInfo *players, int numPlayers, int team1Id, int team2Id);
+
+void findMinimalScoreSwaps(PlayerInfo *players, int numPlayers, int team1Id, int team2Id);
 
 int comparePlayers(const void *a, const void *b);
 
-void logTeamBalance(player_info_t *players, int numPlayers, int team1Id, int team2Id, const char *balanceType);
+void logTeamBalance(PlayerInfo *players, int numPlayers, int team1Id, int team2Id, const char *balanceType);
 
 client_t *getPlayerByNumber(int playerNum);
 
@@ -52,75 +62,123 @@ void printUserInfo(client_t *client);
 
 qboolean isValidTeamId(int teamId);
 
+const char *getStateName(clientState_t state);
+
 const char *getTeamName(int teamId);
 
 void announceTeamsAutobalance();
 
-void announceTeamSwap(const char *player1Name, int originalTeam1Id, int newTeam1Id,
-                      const char *player2Name, int originalTeam2Id, int newTeam2Id);
+void announcePlayerMove(const char *playerName, int originalTeamId, int newTeamId);
 
-void swapPlayers(const player_info_t *player1, const player_info_t *player2);
+void movePlayer(const char *playerName, int newTeamId);
 
 void handleUserinfoChanged(const char *line) {
-    if (!line || *(line + 1) == '\0') {
+    if (!line || *line == '\0') {
         Com_DPrintf("Error: Invalid format. Line is NULL or too short: %s\n", line ? line : "(null)");
         return;
     }
 
-    char *tokens[MAX_STRING_TOKENS];
+    Com_DPrintf("Processing userinfo changed line: %s\n", line);
+
     char line_copy[MAX_INFO_STRING];
-    int numTokens;
-    int playerNum;
-    int teamId;
-
     Q_strncpyz(line_copy, line, sizeof(line_copy));
-    numTokens = Com_Split(line_copy, tokens, MAX_STRING_TOKENS, '\\');
 
-    if (numTokens < 1) {
-        Com_DPrintf("Error: No tokens found in the line: %s\n", line);
+    char *token = strtok(line_copy, " ");
+    if (!token) {
+        Com_DPrintf("Error: Failed to parse player number from line: %s\n", line);
+        return;
+    }
+    int playerNum = atoi(token);
+    if (playerNum < 0 || playerNum >= sv_maxclients->integer) {
+        Com_DPrintf("Error: Invalid player number: %s\n", token);
         return;
     }
 
-    if (sscanf(tokens[0], "%d", &playerNum) != 1) {
-        Com_DPrintf("Error: Invalid player number: %s\n", tokens[0]);
+    char *rest = strtok(NULL, "");
+    if (!rest) {
+        Com_DPrintf("Error: Failed to parse userinfo string from line: %s\n", line);
         return;
     }
 
-    teamId = -1;
-    for (int i = 1; i < numTokens; i++) {
-        if (strcmp(tokens[i], "t") == 0 && i + 1 < numTokens) {
+    Com_DPrintf("Remaining userinfo string: %s\n", rest);
+
+    char *tokens[MAX_STRING_TOKENS];
+    int numTokens = tokenizeUserinfoString(rest, tokens, MAX_STRING_TOKENS);
+
+    Com_DPrintf("Number of tokens parsed: %d\n", numTokens);
+    for (int i = 0; i < numTokens; i++) {
+        Com_DPrintf("Token %d: %s\n", i, tokens[i]);
+    }
+
+    int teamId = -1;
+    char playerName[MAX_INFO_VALUE] = {0};
+
+    for (int i = 0; i < numTokens - 1; i++) {
+        if (strcmp(tokens[i], "t") == 0) {
             teamId = atoi(tokens[i + 1]);
-            break;
+        } else if (strcmp(tokens[i], "n") == 0) {
+            Q_strncpyz(playerName, tokens[i + 1], sizeof(playerName));
         }
     }
 
-    if (teamId == -1) {
-        Com_DPrintf("Error: Invalid or missing team key in the line: %s\n", line);
+    if (!isValidTeamId(teamId)) {
+        Com_DPrintf("Error: Invalid or missing team key in the line: %s. Found Team ID: %d, Player Name: %s\n",
+                    line, teamId, playerName);
         return;
     }
 
-    Com_DPrintf("Player number: %d, Team name: %s\n", playerNum, getTeamName(teamId));
+    if (playerName[0] == '\0') {
+        Com_DPrintf("Error: Missing player name in the line: %s. Found Team ID: %d, Player Name: %s\n",
+                    line, teamId, playerName);
+        return;
+    }
+
+    Com_DPrintf("Parsed Player Info - Number: %d, Team: %s, Name: %s\n",
+                playerNum, getTeamName(teamId), playerName);
 
     client_t *client = getPlayerByNumber(playerNum);
     if (!client) {
-        Com_DPrintf("Error: Could not find player with number: %d\n", playerNum);
+        Com_DPrintf("Error: Could not find player with number: %d. Found Team ID: %d, Player Name: %s\n",
+                    playerNum, teamId, playerName);
         return;
     }
 
     client->teamId = teamId;
-    Com_DPrintf("Team id successfully updated to '%d' for player number %d\n", teamId, playerNum);
+    Com_DPrintf("Team ID successfully updated to '%d' for player number %d\n", teamId, playerNum);
+
+    Info_SetValueForKey(client->userinfo, globalPlayerNameKey, playerName);
+    Info_SetValueForKey(client->userinfo, globalPlayerTeamNameKey, getTeamName(teamId));
+
+    const char *newPlayerName = Info_ValueForKey(client->userinfo, globalPlayerNameKey);
+    const char *newPlayerTeamName = Info_ValueForKey(client->userinfo, globalPlayerTeamNameKey);
+
+    if (strcmp(newPlayerName, playerName) == 0) {
+        Com_DPrintf("Player name successfully updated to '%s' for player number %d\n", playerName, playerNum);
+    } else {
+        Com_DPrintf("Error: Failed to update player name for player number %d. Expected: '%s', Got: '%s'\n",
+                    playerNum, playerName, newPlayerName);
+    }
+
+    const char *expectedTeamName = getTeamName(teamId);
+    if (strcmp(newPlayerTeamName, expectedTeamName) == 0) {
+        Com_DPrintf("Player team successfully updated to '%s' for player number %d\n", expectedTeamName, playerNum);
+    } else {
+        Com_DPrintf("Error: Failed to update player team for player number %d. Expected: '%s', Got: '%s'\n",
+                    playerNum, expectedTeamName, newPlayerTeamName);
+    }
 
     balanceTeams();
 }
 
 void handleKill(const char *line) {
-    if (!line || *(line + 1) == '\0') {
+    if (!line || *line == '\0') {
         Com_DPrintf("Error: Invalid format. Line is NULL or too short: %s\n", line ? line : "(null)");
         return;
     }
 
     int killer_id, victim_id, death_cause_index;
-    char killer_name[MAX_INFO_VALUE], victim_name[MAX_INFO_VALUE];
+    char killer_name[MAX_INFO_VALUE] = {0};
+    char victim_name[MAX_INFO_VALUE] = {0};
 
     const char *colonPos = strchr(line, ':');
     if (!colonPos) {
@@ -146,6 +204,9 @@ void handleKill(const char *line) {
         return;
     }
 
+    killer_name[MAX_INFO_VALUE - 1] = '\0';
+    victim_name[MAX_INFO_VALUE - 1] = '\0';
+
     Com_DPrintf("Processing kill event: Killer ID=%d, Victim ID=%d, Death Cause Index=%d\n",
                 killer_id, victim_id, death_cause_index);
 
@@ -159,7 +220,7 @@ void handleKill(const char *line) {
 
     if (strcmp(killer_name, "<world>") == 0) {
         Com_DPrintf("Info: World caused death, no score updated for killer. Victim ID: %d\n", victim_id);
-        updatePlayerScore(victim, &victim->deaths, 1);
+        updatePlayerScore(victim, SCORE_DEATHS, 1);
         return;
     }
 
@@ -188,14 +249,14 @@ void handleKill(const char *line) {
 
     if (killer_id == victim_id) {
         Com_DPrintf("Info: Suicide detected for player %d.\n", victim_id);
-        updatePlayerScore(victim, &victim->deaths, 1);
+        updatePlayerScore(victim, SCORE_DEATHS, 1);
     } else if (killerTeamId == victimTeamId) {
         Com_DPrintf("Info: Friendly fire detected. Killer ID: %d, Victim ID: %d\n", killer_id, victim_id);
-        updatePlayerScore(killer, &killer->kills, -1);
+        updatePlayerScore(killer, SCORE_KILLS, -1);
     } else {
         Com_DPrintf("Info: Enemy kill detected. Killer ID: %d, Victim ID: %d\n", killer_id, victim_id);
-        updatePlayerScore(killer, &killer->kills, 1);
-        updatePlayerScore(victim, &victim->deaths, 1);
+        updatePlayerScore(killer, SCORE_KILLS, 1);
+        updatePlayerScore(victim, SCORE_DEATHS, 1);
     }
 
     Com_DPrintf("Kill event processing completed for Killer ID: %d, Victim ID: %d\n", killer_id, victim_id);
@@ -213,29 +274,46 @@ void handleExit(const char *line) {
             continue;
         }
 
-        Com_DPrintf("Checking client %d (state: %d)...\n", i, client->state);
-        if (client->state >= CS_CONNECTED) {
-            Com_DPrintf("Resetting stats for connected client (ID: %d):\n", i);
+        if (client->userinfo[0] == '\0') {
+            continue;
+        }
+
+        const char *playerName = Info_ValueForKey(client->userinfo, globalPlayerNameKey);
+        if (client->teamId != -1
+            || client->kills != 0
+            || client->deaths != 0
+            || playerName[0] != '\0') {
+            Com_DPrintf("Resetting stats for client (ID: %d) with non-default values:\n", i);
             printUserInfo(client);
 
+            Info_SetValueForKey(client->userinfo, globalPlayerNameKey, "");
             client->teamId = -1;
             client->kills = 0;
             client->deaths = 0;
+            client->state = CS_FREE;
 
             Com_DPrintf("Client %d stats reset successfully.\n", i);
-        } else {
-            Com_DPrintf("Client %d is not connected (state: %d), skipping reset...\n", i, client->state);
         }
     }
 
     Com_DPrintf("Finished resetting player stats.\n");
 }
 
-void handlePrintLine(char *string) {
-    if (!string) {
+void handlePrintLine(char *inputString) {
+    if (!inputString) {
         Com_DPrintf("Error: Input string is NULL\n");
         return;
     }
+
+    if (*inputString == '\0') {
+        Com_DPrintf("Error: Input string is empty\n");
+        return;
+    }
+
+    Com_DPrintf("Processing input string: %s\n", inputString);
+
+    char string[MAX_INFO_STRING];
+    Q_strncpyz(string, inputString, sizeof(string));
 
     char *colon = strchr(string, ':');
     if (!colon) {
@@ -248,8 +326,11 @@ void handlePrintLine(char *string) {
     char *line = colon + 1;
     while (*line == ' ') line++;
 
+    Com_DPrintf("Parsed action name: %s\n", actionName);
+    Com_DPrintf("Parsed line content: %s\n", line);
+
     if (*actionName == '\0') {
-        Com_DPrintf("Error: Action name is empty in the input string: %s\n", string);
+        Com_DPrintf("Error: Action name is empty in the input string: %s\n", inputString);
         return;
     }
 
@@ -262,6 +343,7 @@ void handlePrintLine(char *string) {
     while (option->actionName != NULL) {
         if (strcmp(option->actionName, actionName) == 0) {
             if (option->handler != NULL) {
+                Com_DPrintf("Found handler for action: %s, executing handler.\n", actionName);
                 option->handler(line);
             } else {
                 Com_DPrintf("Error: Handler function is NULL for action '%s'.\n", actionName);
@@ -270,34 +352,83 @@ void handlePrintLine(char *string) {
         }
         option++;
     }
+
+    Com_DPrintf("Error: No handler found for action '%s'.\n", actionName);
 }
 
-void updatePlayerScore(client_t *client, int *scoreField, int increment) {
+int tokenizeUserinfoString(char *str, char *tokens[], int maxTokens) {
+    if (!str || !tokens || maxTokens <= 0) {
+        Com_DPrintf("Error: Invalid input to tokenizeUserinfoString. str: %s, tokens: %p, maxTokens: %d\n",
+                    str ? str : "(null)", (void *) tokens, maxTokens);
+        return 0;
+    }
+
+    int numTokens = 0;
+    char *ptr = str;
+
+    while (*ptr && numTokens < maxTokens) {
+        if (numTokens >= maxTokens) {
+            Com_DPrintf("Warning: Maximum number of tokens reached: %d\n", maxTokens);
+            break;
+        }
+
+        tokens[numTokens++] = ptr;
+
+        while (*ptr && *ptr != '\\') {
+            ptr++;
+        }
+
+        if (*ptr) {
+            *ptr++ = '\0';
+        }
+    }
+
+    if (numTokens < maxTokens) {
+        tokens[numTokens] = NULL;
+    }
+
+    return numTokens;
+}
+
+void updatePlayerScore(client_t *client, ScoreFieldType field, int increment) {
     if (!client) {
         Com_DPrintf("Error: Client is NULL\n");
         return;
     }
 
     int clientId = (int) (client - svs.clients);
+    int *scoreField;
+    const char *scoreFieldName;
 
-    if (!scoreField) {
-        Com_DPrintf("Error: scoreField is NULL for client %d\n", clientId);
-        return;
+    switch (field) {
+        case SCORE_KILLS:
+            scoreField = &client->kills;
+            scoreFieldName = "kills";
+            break;
+        case SCORE_DEATHS:
+            scoreField = &client->deaths;
+            scoreFieldName = "deaths";
+            break;
+        default:
+            Com_DPrintf("Error: Invalid score field for client %d\n", clientId);
+            return;
     }
+
+    Com_DPrintf("Updating %s for client %d:\n", scoreFieldName, clientId);
+    Com_DPrintf("  Previous %s: %d\n", scoreFieldName, *scoreField);
+    Com_DPrintf("  Increment: %d\n", increment);
 
     int oldScore = *scoreField;
     *scoreField += increment;
     int newScore = *scoreField;
 
-    Com_DPrintf("Updating score for client %d:\n", clientId);
-    Com_DPrintf("  Previous score: %d\n", oldScore);
-    Com_DPrintf("  Increment: %d\n", increment);
-    Com_DPrintf("  New score: %d\n", newScore);
+    Com_DPrintf("  New %s: %d\n", scoreFieldName, newScore);
 
-    if (*scoreField == newScore) {
-        Com_DPrintf("Score successfully updated for client %d\n", clientId);
+    if (newScore == oldScore + increment) {
+        Com_DPrintf("%s successfully updated for client %d\n", scoreFieldName, clientId);
     } else {
-        Com_DPrintf("Error: Score update failed for client %d\n", clientId);
+        Com_DPrintf("Error: %s update failed for client %d. Expected: %d, Got: %d\n",
+                    scoreFieldName, clientId, oldScore + increment, newScore);
     }
 }
 
@@ -318,15 +449,15 @@ void balanceTeams(void) {
                 minBalanceIntervalMs);
         atomic_flag_clear(&balanceTeamsFlag);
         return;
-    } else {
-        Com_DPrintf(
-                "Proceeding with team balance. Current time: %d, Last balance time: %d, Time since last balance: %d ms, Minimum interval: %d ms\n",
-                currentTime, lastBalanceTime, timeSinceLastBalance, minBalanceIntervalMs);
     }
+
+    Com_DPrintf(
+            "Proceeding with team balance. Current time: %d, Last balance time: %d, Time since last balance: %d ms, Minimum interval: %d ms\n",
+            currentTime, lastBalanceTime, timeSinceLastBalance, minBalanceIntervalMs);
 
     Com_DPrintf("Initiating team balance process at time: %d\n", currentTime);
 
-    player_info_t players[MAX_CLIENTS];
+    PlayerInfo players[MAX_CLIENTS];
     int numPlayers = 0;
     int team1Id = -1;
     int team2Id = -1;
@@ -345,13 +476,12 @@ void balanceTeams(void) {
                 continue;
             }
 
-            int score = (kills * maxScore) / (deaths + 1);
-
             players[numPlayers].playerNum = i;
             players[numPlayers].kills = kills;
             players[numPlayers].deaths = deaths;
-            players[numPlayers].score = score;
+            players[numPlayers].score = kills - deaths;
             players[numPlayers].teamId = teamId;
+            players[numPlayers].newTeamId = teamId;
 
             if (team1Id == -1) {
                 team1Id = teamId;
@@ -376,210 +506,218 @@ void balanceTeams(void) {
     Com_DPrintf("Teams identified: Team1=%s, Team2=%s\n", getTeamName(team1Id), getTeamName(team2Id));
     logTeamBalance(players, numPlayers, team1Id, team2Id, "Current");
 
-    Com_DPrintf("Sorting players by score...\n");
-    qsort(players, numPlayers, sizeof(player_info_t), comparePlayers);
+    qsort(players, numPlayers, sizeof(PlayerInfo), comparePlayers);
 
-    int team1Score = 0, team2Score = 0;
-    int team1Count = 0, team2Count = 0;
+    equalizeTeamSizes(players, numPlayers, team1Id, team2Id);
+    findMinimalScoreSwaps(players, numPlayers, team1Id, team2Id);
+
+    int movesMade = 0;
 
     for (int i = 0; i < numPlayers; i++) {
-        if (players[i].teamId == team1Id) {
-            team1Score += players[i].score;
-            team1Count++;
-        } else if (players[i].teamId == team2Id) {
-            team2Score += players[i].score;
-            team2Count++;
+        if (players[i].teamId != players[i].newTeamId) {
+            movesMade++;
         }
     }
 
-    float team1Average = (team1Count > 0) ? (float) team1Score / (float) team1Count : 0;
-    float team2Average = (team2Count > 0) ? (float) team2Score / (float) team2Count : 0;
-
-    float totalAverageScore = team1Average + team2Average;
-
-    float team1Percentage = (totalAverageScore > 0) ? (team1Average / totalAverageScore) * 100 : 0;
-    float team2Percentage = (totalAverageScore > 0) ? (team2Average / totalAverageScore) * 100 : 0;
-
-    Com_DPrintf("Current scores - %s: %.2f%%, %s: %.2f%%\n",
-                getTeamName(team1Id), team1Percentage, getTeamName(team2Id), team2Percentage);
-
-    float scoreDifference = fabs(team1Percentage - team2Percentage);
-
-    if (scoreDifference <= sv_scoreThreshold->value) {
-        Com_DPrintf("Teams are balanced within the threshold (%.2f). No shuffling required.\n",
-                    sv_scoreThreshold->value);
-        atomic_flag_clear(&balanceTeamsFlag);
-        return;
-    }
-
-    Com_DPrintf("Finding optimal player swap to balance teams...\n");
-    int bestPlayer1Index = -1;
-    int bestPlayer2Index = -1;
-    findOptimalSwap(players, numPlayers, team1Id, team2Id, &bestPlayer1Index, &bestPlayer2Index);
-
-    if (bestPlayer1Index != -1 && bestPlayer2Index != -1) {
-        int originalTeam1Id = players[bestPlayer1Index].teamId;
-        int originalTeam2Id = players[bestPlayer2Index].teamId;
-        int newTeam1Id = team2Id;
-        int newTeam2Id = team1Id;
-
-        int newTeam1Score = team1Score - players[bestPlayer1Index].score + players[bestPlayer2Index].score;
-        int newTeam2Score = team2Score - players[bestPlayer2Index].score + players[bestPlayer1Index].score;
-
-        float newTeam1Average = (team1Count > 0) ? (float) newTeam1Score / (float) team1Count : 0;
-        float newTeam2Average = (team2Count > 0) ? (float) newTeam2Score / (float) team2Count : 0;
-
-        float newTotalAverageScore = newTeam1Average + newTeam2Average;
-
-        float newTeam1Percentage = (newTotalAverageScore > 0) ? (newTeam1Average / newTotalAverageScore) * 100 : 0;
-        float newTeam2Percentage = (newTotalAverageScore > 0) ? (newTeam2Average / newTotalAverageScore) * 100 : 0;
-
-        float newScoreDifference = fabs(newTeam1Percentage - newTeam2Percentage);
-
-        client_t *client1 = getPlayerByNumber(players[bestPlayer1Index].playerNum);
-        client_t *client2 = getPlayerByNumber(players[bestPlayer2Index].playerNum);
-
-        const char *player1Name = Info_ValueForKey(client1->userinfo, globalPlayerNameKey);
-        const char *player2Name = Info_ValueForKey(client2->userinfo, globalPlayerNameKey);
-
-        Com_DPrintf("Swapping player %s (team %s) with player %s (team %s)\n",
-                    player1Name, getTeamName(originalTeam1Id), player2Name, getTeamName(originalTeam2Id));
-        Com_DPrintf("Estimated balance score after swap - %s: %.2f%%, %s: %.2f%%. New score difference: %.2f\n",
-                    getTeamName(newTeam1Id), newTeam1Percentage,
-                    getTeamName(newTeam2Id), newTeam2Percentage, newScoreDifference);
-
+    if (movesMade > 0) {
         announceTeamsAutobalance();
-        announceTeamSwap(player1Name, originalTeam1Id, newTeam1Id,
-                         player2Name, originalTeam2Id, newTeam2Id);
-        swapPlayers(&players[bestPlayer1Index], &players[bestPlayer2Index]);
+        Com_DPrintf("Number of players to be moved: %d\n", movesMade);
 
-        lastBalanceTime = svs.time;
+        for (int i = 0; i < numPlayers; i++) {
+            if (players[i].teamId != players[i].newTeamId) {
+                PlayerInfo *player = &players[i];
+                int originalTeamId = player->teamId;
+                int newTeamId = player->newTeamId;
+
+                client_t *client = getPlayerByNumber(player->playerNum);
+                const char *playerName = Info_ValueForKey(client->userinfo, globalPlayerNameKey);
+
+                Com_DPrintf("Preparing to move player '%s' (PlayerNum: %d) from team '%s' to team '%s'.\n",
+                            playerName, player->playerNum, getTeamName(originalTeamId), getTeamName(newTeamId));
+
+                announcePlayerMove(playerName, originalTeamId, newTeamId);
+                movePlayer(playerName, newTeamId);
+
+                client->teamId = newTeamId;
+                player->teamId = newTeamId;
+                Info_SetValueForKey(client->userinfo, globalPlayerTeamNameKey, getTeamName(newTeamId));
+                const char *updatedTeamName = Info_ValueForKey(client->userinfo, globalPlayerTeamNameKey);
+                if (strcmp(updatedTeamName, getTeamName(newTeamId)) == 0) {
+                    Com_DPrintf("Successfully moved player '%s' to team '%s'.\n", playerName, updatedTeamName);
+                } else {
+                    Com_DPrintf("Error: Failed to update team for player '%s'. Expected: '%s', Got: '%s'\n",
+                                playerName, getTeamName(newTeamId), updatedTeamName);
+                }
+            }
+        }
     } else {
-        Com_DPrintf("No optimal swap found to improve team balance.\n");
+        Com_DPrintf("No players needed to be moved.\n");
     }
 
+    lastBalanceTime = svs.time;
     logTeamBalance(players, numPlayers, team1Id, team2Id, "Final");
     Com_DPrintf("Team balancing process completed.\n");
 
     atomic_flag_clear(&balanceTeamsFlag);
 }
 
-void findOptimalSwap(player_info_t *players, int numPlayers, int team1Id, int team2Id,
-                     int *bestPlayer1Index, int *bestPlayer2Index) {
-    int team1Score = 0, team2Score = 0;
+void equalizeTeamSizes(PlayerInfo *players, int numPlayers, int team1Id, int team2Id) {
     int team1Count = 0, team2Count = 0;
 
     for (int i = 0; i < numPlayers; i++) {
         if (players[i].teamId == team1Id) {
-            team1Score += players[i].score;
             team1Count++;
         } else if (players[i].teamId == team2Id) {
-            team2Score += players[i].score;
             team2Count++;
         }
     }
 
-    float team1Average = (team1Count > 0) ? (float) team1Score / (float) team1Count : 0;
-    float team2Average = (team2Count > 0) ? (float) team2Score / (float) team2Count : 0;
+    Com_DPrintf("Initial team sizes: Team1=%d, Team2=%d\n", team1Count, team2Count);
 
-    float totalAverageScore = team1Average + team2Average;
+    int sizeDifference = abs(team1Count - team2Count);
+    if (sizeDifference <= 1) {
+        Com_DPrintf("Team sizes are already balanced or nearly balanced. No swaps needed.\n");
+        return;
+    }
 
-    float team1Percentage = (totalAverageScore > 0) ? (team1Average / totalAverageScore) * 100 : 0;
-    float team2Percentage = (totalAverageScore > 0) ? (team2Average / totalAverageScore) * 100 : 0;
+    int targetSize = (team1Count + team2Count) / 2;
 
-    float initialScoreDifference = fabs(team1Percentage - team2Percentage);
-    Com_DPrintf("Initial score difference: %.2f\n", initialScoreDifference);
+    bool movedPlayers[MAX_CLIENTS] = {false};
 
-    float bestScoreDifference = initialScoreDifference;
-
-    for (int i = 0; i < numPlayers; i++) {
-        for (int j = 0; j < numPlayers; j++) {
-            if (players[i].teamId == team1Id && players[j].teamId == team2Id) {
-                int newTeam1Score = team1Score - players[i].score + players[j].score;
-                int newTeam2Score = team2Score - players[j].score + players[i].score;
-
-                float newTeam1Average = (team1Count > 0) ? (float) newTeam1Score / (float) team1Count : 0;
-                float newTeam2Average = (team2Count > 0) ? (float) newTeam2Score / (float) team2Count : 0;
-
-                float newTotalAverageScore = newTeam1Average + newTeam2Average;
-
-                float newTeam1Percentage = (newTotalAverageScore > 0)
-                                           ? (newTeam1Average / newTotalAverageScore) * 100
-                                           : 0;
-                float newTeam2Percentage = (newTotalAverageScore > 0)
-                                           ? (newTeam2Average / newTotalAverageScore) * 100
-                                           : 0;
-
-                float newScoreDifference = fabs(newTeam1Percentage - newTeam2Percentage);
-
-                if (newScoreDifference < bestScoreDifference) {
-                    bestScoreDifference = newScoreDifference;
-                    *bestPlayer1Index = i;
-                    *bestPlayer2Index = j;
-                }
+    while (team1Count > targetSize) {
+        bool moved = false;
+        for (int i = numPlayers - 1; i >= 0; i--) {
+            if (players[i].teamId == team1Id && !movedPlayers[i]) {
+                Com_DPrintf("Equalizing size: Moving player %d from Team1 to Team2\n", players[i].playerNum);
+                players[i].newTeamId = team2Id;
+                movedPlayers[i] = true;
+                team1Count--;
+                team2Count++;
+                moved = true;
+                break;
             }
+        }
+        if (!moved) break;
+    }
+
+    while (team2Count > targetSize) {
+        bool moved = false;
+        for (int i = numPlayers - 1; i >= 0; i--) {
+            if (players[i].teamId == team2Id && !movedPlayers[i]) {
+                Com_DPrintf("Equalizing size: Moving player %d from Team2 to Team1\n", players[i].playerNum);
+                players[i].newTeamId = team1Id;
+                movedPlayers[i] = true;
+                team2Count--;
+                team1Count++;
+                moved = true;
+                break;
+            }
+        }
+        if (!moved) break;
+    }
+
+    Com_DPrintf("Final team sizes after equalizing: Team1=%d, Team2=%d\n", team1Count, team2Count);
+}
+
+void findMinimalScoreSwaps(PlayerInfo *players, int numPlayers, int team1Id, int team2Id) {
+    int team1Score = 0, team2Score = 0;
+    for (int i = 0; i < numPlayers; i++) {
+        if (players[i].teamId == team1Id) {
+            team1Score += players[i].score;
+        } else if (players[i].teamId == team2Id) {
+            team2Score += players[i].score;
         }
     }
 
-    Com_DPrintf("Best score difference after evaluation: %.2f\n", bestScoreDifference);
+    Com_DPrintf("Initial team scores: Team1=%d, Team2=%d\n", team1Score, team2Score);
+
+    float bestScoreDifference = fabs(team1Score - team2Score);
+    while (bestScoreDifference > sv_scoreThreshold->value) {
+        int bestPlayer1Index = -1;
+        int bestPlayer2Index = -1;
+
+        for (int i = 0; i < numPlayers; i++) {
+            for (int j = 0; j < numPlayers; j++) {
+                if (players[i].teamId == team1Id && players[j].teamId == team2Id) {
+                    int newTeam1Score = team1Score - players[i].score + players[j].score;
+                    int newTeam2Score = team2Score - players[j].score + players[i].score;
+                    float newScoreDifference = fabs(newTeam1Score - newTeam2Score);
+
+                    if (newScoreDifference < bestScoreDifference) {
+                        bestScoreDifference = newScoreDifference;
+                        bestPlayer1Index = i;
+                        bestPlayer2Index = j;
+                    }
+                }
+            }
+        }
+
+        if (bestPlayer1Index == -1 || bestPlayer2Index == -1) {
+            break;
+        }
+
+        Com_DPrintf("Balancing score: Swapping player %d (Team1) with player %d (Team2)\n",
+                    players[bestPlayer1Index].playerNum, players[bestPlayer2Index].playerNum);
+
+        players[bestPlayer1Index].newTeamId = team2Id;
+        players[bestPlayer2Index].newTeamId = team1Id;
+
+        team1Score = team1Score - players[bestPlayer1Index].score + players[bestPlayer2Index].score;
+        team2Score = team2Score - players[bestPlayer2Index].score + players[bestPlayer1Index].score;
+
+        bestScoreDifference = fabs(team1Score - team2Score);
+    }
+
+    Com_DPrintf("Final team scores after balancing: Team1=%d, Team2=%d\n", team1Score, team2Score);
 }
 
 int comparePlayers(const void *a, const void *b) {
-    return ((player_info_t *) b)->score - ((player_info_t *) a)->score;
+    return ((PlayerInfo *) b)->score - ((PlayerInfo *) a)->score;
 }
 
-void logTeamBalance(player_info_t *players, int numPlayers, int team1Id, int team2Id, const char *balanceType) {
+void logTeamBalance(PlayerInfo *players, int numPlayers, int team1Id, int team2Id, const char *balanceType) {
     int team1Score = 0, team2Score = 0;
     int team1Kills = 0, team2Kills = 0;
     int team1Deaths = 0, team2Deaths = 0;
     int team1Count = 0, team2Count = 0;
 
+    Com_DPrintf("%s team balance:\n", balanceType);
+
     for (int i = 0; i < numPlayers; i++) {
-        if (players[i].teamId == team1Id) {
-            team1Score += players[i].score;
-            team1Kills += players[i].kills;
-            team1Deaths += players[i].deaths;
-            team1Count++;
-        } else if (players[i].teamId == team2Id) {
-            team2Score += players[i].score;
-            team2Kills += players[i].kills;
-            team2Deaths += players[i].deaths;
-            team2Count++;
+        if (svs.clients[players[i].playerNum].state >= CS_CONNECTED) {
+            Com_DPrintf("Player %d: Team=%s, Kills=%d, Deaths=%d, Score=%d\n",
+                        players[i].playerNum, getTeamName(players[i].teamId),
+                        players[i].kills, players[i].deaths, players[i].score);
+
+            if (players[i].teamId == team1Id) {
+                team1Score += players[i].score;
+                team1Kills += players[i].kills;
+                team1Deaths += players[i].deaths;
+                team1Count++;
+            } else if (players[i].teamId == team2Id) {
+                team2Score += players[i].score;
+                team2Kills += players[i].kills;
+                team2Deaths += players[i].deaths;
+                team2Count++;
+            }
         }
     }
 
-    float team1Average = (team1Count > 0) ? (float) team1Score / (float) team1Count : 0;
-    float team2Average = (team2Count > 0) ? (float) team2Score / (float) team2Count : 0;
-
-    float totalAverageScore = team1Average + team2Average;
-
-    float team1Percentage = (totalAverageScore > 0) ? (team1Average / totalAverageScore) * 100 : 0;
-    float team2Percentage = (totalAverageScore > 0) ? (team2Average / totalAverageScore) * 100 : 0;
-
-    Com_DPrintf("%s team balance:\n", balanceType);
-    Com_DPrintf("%s: %d players, Total score: %d, Average score: %.2f%%, Kills: %d, Deaths: %d\n",
-                getTeamName(team1Id), team1Count, team1Score, team1Percentage, team1Kills, team1Deaths);
-    Com_DPrintf("%s: %d players, Total score: %d, Average score: %.2f%%, Kills: %d, Deaths: %d\n",
-                getTeamName(team2Id), team2Count, team2Score, team2Percentage, team2Kills, team2Deaths);
+    Com_DPrintf("%s summary:\n", balanceType);
+    Com_DPrintf("%s: %d players, Total score: %d, Kills: %d, Deaths: %d\n",
+                getTeamName(team1Id), team1Count, team1Score, team1Kills, team1Deaths);
+    Com_DPrintf("%s: %d players, Total score: %d, Kills: %d, Deaths: %d\n",
+                getTeamName(team2Id), team2Count, team2Score, team2Kills, team2Deaths);
 }
 
 client_t *getPlayerByNumber(int playerNum) {
-    Com_DPrintf("Fetching player by number: %d\n", playerNum);
-
     if (playerNum < 0 || playerNum >= sv_maxclients->integer) {
         Com_DPrintf("Error: Player number %d is out of valid range (0-%d).\n",
                     playerNum, sv_maxclients->integer - 1);
         return NULL;
     }
 
-    client_t *cl = &svs.clients[playerNum];
-    if (cl->state >= CS_CONNECTED) {
-        return cl;
-    } else {
-        Com_DPrintf("Error: Player number %d is not connected. State: %d\n",
-                    playerNum, cl->state);
-        return NULL;
-    }
+    return &svs.clients[playerNum];
 }
 
 void printUserInfo(client_t *client) {
@@ -588,17 +726,23 @@ void printUserInfo(client_t *client) {
         return;
     }
 
-    Com_DPrintf("Userinfo for client %d:\n", (int) (client - svs.clients));
-    const char *userinfo = client->userinfo;
+    int playerId = (int) (client - svs.clients);
+    const char *playerName = Info_ValueForKey(client->userinfo, globalPlayerNameKey);
+    const char *teamName = getTeamName(client->teamId);
+    const char *stateName = getStateName(client->state);
 
+    Com_DPrintf("Userinfo for client %d:\n", playerId);
+
+    const char *userinfo = client->userinfo;
     if (*userinfo != '\\') {
-        Com_DPrintf("Error: Malformed userinfo string\n");
+        Com_DPrintf("Error: Malformed userinfo string. Userinfo: %s\n", userinfo);
         return;
     }
 
     char key[BIG_INFO_KEY];
     char value[BIG_INFO_VALUE];
 
+    Com_DPrintf("Parsed userinfo key-value pairs:\n");
     while (*userinfo) {
         userinfo = Info_NextPair(userinfo, key, value);
         if (*key == '\0') {
@@ -608,18 +752,34 @@ void printUserInfo(client_t *client) {
         Com_DPrintf("  %s: %s\n", key, value);
     }
 
-    int teamId = client->teamId;
-    int kills = client->kills;
-    int deaths = client->deaths;
-
-    Com_DPrintf("  Team ID: %d\n", teamId);
-    Com_DPrintf("  Team Name: %s\n", getTeamName(teamId));
-    Com_DPrintf("  Kills: %d\n", kills);
-    Com_DPrintf("  Deaths: %d\n", deaths);
+    Com_DPrintf("  Player ID: %d\n", playerId);
+    Com_DPrintf("  Name: %s\n", playerName);
+    Com_DPrintf("  Team ID: %d\n", client->teamId);
+    Com_DPrintf("  Team Name: %s\n", teamName);
+    Com_DPrintf("  State: %s\n", stateName);
+    Com_DPrintf("  Kills: %d\n", client->kills);
+    Com_DPrintf("  Deaths: %d\n", client->deaths);
 }
 
 qboolean isValidTeamId(int teamId) {
     return teamId == 0 || teamId == 1 || teamId == 2;
+}
+
+const char *getStateName(clientState_t state) {
+    switch (state) {
+        case CS_FREE:
+            return "Free";
+        case CS_ZOMBIE:
+            return "Zombie";
+        case CS_CONNECTED:
+            return "Connected";
+        case CS_PRIMED:
+            return "Primed";
+        case CS_ACTIVE:
+            return "Active";
+        default:
+            return "Unknown";
+    }
 }
 
 const char *getTeamName(int teamId) {
@@ -638,26 +798,59 @@ const char *getTeamName(int teamId) {
 }
 
 void announceTeamsAutobalance() {
-    char sayCommand[MAX_STRING_CHARS];
+    char sayCommand[MAX_CMD_LINE];
     Com_sprintf(sayCommand, sizeof(sayCommand), "bigtext \"Autobalancing Teams!\"\n");
     Cbuf_ExecuteText(EXEC_NOW, sayCommand);
     Cbuf_Execute();
 }
 
-void announceTeamSwap(const char *player1Name, int originalTeam1Id, int newTeam1Id,
-                      const char *player2Name, int originalTeam2Id, int newTeam2Id) {
-    char sayCommand[MAX_STRING_CHARS];
-    Com_sprintf(sayCommand, sizeof(sayCommand),
-                "say ^7[^2Autobalancing^7] ^1%s ^7(^4%s^7) ^7swapped with ^1%s ^7(^4%s^7)\n",
-                player1Name, getTeamName(originalTeam1Id),
-                player2Name, getTeamName(originalTeam2Id));
-    Cbuf_ExecuteText(EXEC_NOW, sayCommand);
+void announcePlayerMove(const char *playerName, int originalTeamId, int newTeamId) {
+    const char *originalTeamColor = "";
+    const char *newTeamColor = "";
+
+    switch (originalTeamId) {
+        case 0:
+            originalTeamColor = "^2"; // Green
+            break;
+        case 1:
+            originalTeamColor = "^1"; // Red
+            break;
+        case 2:
+            originalTeamColor = "^4"; // Blue
+            break;
+        default:
+            originalTeamColor = "^7"; // Default white color
+    }
+
+    switch (newTeamId) {
+        case 0:
+            newTeamColor = "^2"; // Green
+            break;
+        case 1:
+            newTeamColor = "^1"; // Red
+            break;
+        case 2:
+            newTeamColor = "^4"; // Blue
+            break;
+        default:
+            newTeamColor = "^7"; // Default white color
+    }
+
+    const char *originalTeamName = getTeamName(originalTeamId);
+    const char *newTeamName = getTeamName(newTeamId);
+
+    char announcement[MAX_CMD_LINE];
+    Com_sprintf(announcement, sizeof(announcement),
+                "say ^7[^3Team Balance^7] ^7Player ^3%s ^7will be moved from %s%s ^7to %s%s^7.\n",
+                playerName, originalTeamColor, originalTeamName, newTeamColor, newTeamName);
+
+    Cbuf_ExecuteText(EXEC_NOW, announcement);
     Cbuf_Execute();
 }
 
-void swapPlayers(const player_info_t *player1, const player_info_t *player2) {
-    char command[MAX_STRING_CHARS];
-    Com_sprintf(command, sizeof(command), "swap %d %d\n", player1->playerNum, player2->playerNum);
+void movePlayer(const char *playerName, int newTeamId) {
+    char command[MAX_CMD_LINE];
+    Com_sprintf(command, sizeof(command), "forceteam %s %s\n", playerName, getTeamName(newTeamId));
     Cbuf_ExecuteText(EXEC_NOW, command);
     Cbuf_Execute();
 }
