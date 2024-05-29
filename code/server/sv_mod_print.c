@@ -5,8 +5,8 @@
 const char *globalPlayerNameKey = "name";
 const char *globalPlayerTeamNameKey = "team";
 
-static int lastBalanceTime = 0;
-static atomic_flag balanceTeamsFlag = ATOMIC_FLAG_INIT;
+int lastBalanceTime = 0;
+atomic_flag balanceTeamsFlag = ATOMIC_FLAG_INIT;
 
 typedef void (*ActionFunc)(const char *);
 

@@ -8,6 +8,8 @@ static cvar_t com_developer_val = {.integer = 1, .value = 1};
 
 extern char *globalPlayerNameKey;
 extern char *globalPlayerTeamNameKey;
+extern atomic_flag balanceTeamsFlag;
+extern int lastBalanceTime;
 
 void balanceTeams(void);
 
@@ -1118,6 +1120,76 @@ void testHandleMultiplePlayersInit(void) {
     disconnectPlayerId(playerId2);
 }
 
+void testBalanceTeamsWhenFlagIsSet(void) {
+    clearState();
+    populateTeams(7, 3);
+
+    atomic_flag_test_and_set(&balanceTeamsFlag);
+
+    balanceTeams();
+
+    assertTeamBalance(7, 3, 10);
+
+    atomic_flag_clear(&balanceTeamsFlag);
+}
+
+void testBalanceTeamsWhenIntervalHasNotPassed(void) {
+    clearState();
+    populateTeams(7, 3);
+
+    sv_minBalanceInterval->integer = 5;
+    lastBalanceTime = svs.time;
+
+    balanceTeams();
+
+    assertTeamBalance(7, 3, 10);
+
+    svs.time += 6000;
+
+    balanceTeams();
+
+    assertTeamBalance(5, 5, 10);
+}
+
+void testBalanceTeamsWithImmediateRebalance(void) {
+    clearState();
+    populateTeams(7, 3);
+
+    sv_minBalanceInterval->integer = 0;
+    lastBalanceTime = 0;
+
+    balanceTeams();
+    assertTeamBalance(5, 5, 10);
+
+    balanceTeams();
+    assertTeamBalance(5, 5, 10);
+}
+
+void testBalanceTeamsRespectsMinBalanceInterval(void) {
+    clearState();
+    populateTeams(7, 3);
+
+    sv_minBalanceInterval->integer = 2;
+
+    balanceTeams();
+
+    int initialLastBalanceTime = lastBalanceTime;
+
+    svs.time += 1000;
+
+    balanceTeams();
+
+    mu_assert_int_eq("lastBalanceTime should not be updated", lastBalanceTime, initialLastBalanceTime);
+    assertTeamBalance(7, 3, 10);
+
+    svs.time += 2000;
+
+    balanceTeams();
+
+    mu_assert_int_ne("lastBalanceTime should be updated", lastBalanceTime, initialLastBalanceTime);
+    assertTeamBalance(5, 5, 10);
+}
+
 void testPrint(void) {
     initializeServerState();
 
@@ -1187,6 +1259,10 @@ void testPrint(void) {
     mu_run_test(testHandleKillWithInvalidPlayerNumber);
     mu_run_test(testPlayerStatsResetOnInitGame);
     mu_run_test(testHandleMultiplePlayersInit);
+    mu_run_test(testBalanceTeamsWhenFlagIsSet);
+    mu_run_test(testBalanceTeamsWhenIntervalHasNotPassed);
+    mu_run_test(testBalanceTeamsWithImmediateRebalance);
+    mu_run_test(testBalanceTeamsRespectsMinBalanceInterval);
 
     finalizeServerState();
 }
@@ -1284,6 +1360,9 @@ void printPlayerDetails(void) {
 }
 
 void clearState(void) {
+    svs.time = 0;
+    atomic_flag_clear(&balanceTeamsFlag);
+
     for (int i = 0; i < sv_maxclients->integer; i++) {
         resetPlayerDetails(&svs.clients[i]);
     }

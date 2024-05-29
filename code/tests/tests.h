@@ -4,6 +4,7 @@
 #include <time.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 
 extern int tests_run;
 
@@ -38,6 +39,14 @@ extern int tests_run;
     do { \
         if ((actual) != (expected)) { \
             fprintf(stderr, "%s\nActual: %ld\nExpected: %ld\n", message, (long) actual, (long) expected); \
+            exit(EXIT_FAILURE); \
+        } \
+    } while (0)
+
+#define mu_assert_int_ne(message, actual, expected) \
+    do { \
+        if ((actual) == (expected)) { \
+            fprintf(stderr, "%s\nActual: %ld\nExpected (not equal to): %ld\n", message, (long) actual, (long) expected); \
             exit(EXIT_FAILURE); \
         } \
     } while (0)
