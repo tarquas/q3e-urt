@@ -19,26 +19,54 @@ typedef struct {
     int playerNum;
     int kills;
     int deaths;
+    int assists;
     int score;
     int teamId;
     int newTeamId;
+    int flagPickups;
+    int bombPickups;
+    int flagDropped;
+    int flagReturned;
+    int flagCaptured;
+    int minCapTime;
+    int maxCapTime;
 } PlayerInfo;
 
 typedef enum {
     SCORE_KILLS,
-    SCORE_DEATHS
+    SCORE_DEATHS,
+    SCORE_ASSISTS,
+    SCORE_FLAG_PICKUPS,
+    SCORE_BOMB_PICKUPS,
+    SCORE_FLAG_DROPPED,
+    SCORE_FLAG_RETURNED,
+    SCORE_FLAG_CAPTURED,
+    SCORE_MIN_CAPTURE_TIME,
+    SCORE_MAX_CAPTURE_TIME
 } ScoreFieldType;
+
+void handleInitGame(const char *line);
 
 void handleUserinfoChanged(const char *line);
 
 void handleKill(const char *line);
 
-void handleExit(const char *line);
+void handleItem(const char *line);
+
+void handleFlag(const char *line);
+
+void handleFlagCaptureTime(const char *line);
+
+void handleAssist(const char *line);
 
 ActionMap options[] = {
+        {"InitGame",              handleInitGame},
         {"ClientUserinfoChanged", handleUserinfoChanged},
         {"Kill",                  handleKill},
-        {"Exit",                  handleExit},
+        {"Item",                  handleItem},
+        {"Flag",                  handleFlag},
+        {"FlagCaptureTime",       handleFlagCaptureTime},
+        {"Assist",                handleAssist},
         {NULL, NULL},
 };
 
@@ -72,6 +100,79 @@ void announcePlayerMove(const char *playerName, int originalTeamId, int newTeamI
 
 void movePlayer(const char *playerName, int newTeamId);
 
+void resetAllPlayerStatsAndSettings(void);
+
+void printTokens(char *tokens[], int numTokens);
+
+void handleInitGame(const char *line) {
+    Com_DPrintf("Resetting all player stats and settings.\n");
+    resetAllPlayerStatsAndSettings();
+
+    char *tokens[MAX_STRING_TOKENS];
+    int numTokens = tokenizeUserinfoString((char *) line, tokens, MAX_STRING_TOKENS);
+    printTokens(tokens, numTokens);
+
+    bool mapNameFound = false;
+    bool gameTypeFound = false;
+
+    for (int i = 0; i < numTokens; i++) {
+        if (strcmp(tokens[i], "mapname") == 0 && (i + 1) < numTokens) {
+            strncpy(svs.gameSettings.mapName, tokens[i + 1], sizeof(svs.gameSettings.mapName) - 1);
+            svs.gameSettings.mapName[sizeof(svs.gameSettings.mapName) - 1] = '\0';
+            Com_DPrintf("Parsed map name: %s\n", svs.gameSettings.mapName);
+            mapNameFound = true;
+        } else if (strcmp(tokens[i], "g_gametype") == 0 && (i + 1) < numTokens) {
+            svs.gameSettings.gameType = atoi(tokens[i + 1]);
+            Com_DPrintf("Parsed game type: %d\n", svs.gameSettings.gameType);
+            gameTypeFound = true;
+            switch (svs.gameSettings.gameType) {
+                case 0:
+                case 1:
+                case 9:
+                case 11:
+                    svs.gameSettings.ffa_lms_gametype = qtrue;
+                    Com_DPrintf("Game type set to Free for All or Last Man Standing\n");
+                    break;
+                case 7:
+                    svs.gameSettings.ctf_gametype = qtrue;
+                    Com_DPrintf("Game type set to Capture the Flag\n");
+                    break;
+                case 4:
+                case 5:
+                    svs.gameSettings.ts_gametype = qtrue;
+                    Com_DPrintf("Game type set to Team Survivor\n");
+                    break;
+                case 3:
+                    svs.gameSettings.tdm_gametype = qtrue;
+                    Com_DPrintf("Game type set to Team Deathmatch\n");
+                    break;
+                case 8:
+                    svs.gameSettings.bomb_gametype = qtrue;
+                    Com_DPrintf("Game type set to Bomb Mode\n");
+                    break;
+                case 10:
+                    svs.gameSettings.freeze_gametype = qtrue;
+                    Com_DPrintf("Game type set to Freeze Tag\n");
+                    break;
+                default:
+                    Com_DPrintf("Unknown game type: %d\n", svs.gameSettings.gameType);
+                    break;
+            }
+        }
+    }
+
+    if (!mapNameFound) {
+        Com_DPrintf("Error: mapname is missing in the InitGame string.\n");
+        return;
+    }
+    if (!gameTypeFound) {
+        Com_DPrintf("Error: g_gametype is missing in the InitGame string.\n");
+        return;
+    }
+    Com_DPrintf("Game initialized with map: %s, game type: %d\n",
+                svs.gameSettings.mapName, svs.gameSettings.gameType);
+}
+
 void handleUserinfoChanged(const char *line) {
     if (!line || *line == '\0') {
         Com_DPrintf("Error: Invalid format. Line is NULL or too short: %s\n", line ? line : "(null)");
@@ -80,10 +181,10 @@ void handleUserinfoChanged(const char *line) {
 
     Com_DPrintf("Processing userinfo changed line: %s\n", line);
 
-    char line_copy[MAX_INFO_STRING];
-    Q_strncpyz(line_copy, line, sizeof(line_copy));
+    char lineCopy[MAX_INFO_STRING];
+    Q_strncpyz(lineCopy, line, sizeof(lineCopy));
 
-    char *token = strtok(line_copy, " ");
+    char *token = strtok(lineCopy, " ");
     if (!token) {
         Com_DPrintf("Error: Failed to parse player number from line: %s\n", line);
         return;
@@ -104,11 +205,7 @@ void handleUserinfoChanged(const char *line) {
 
     char *tokens[MAX_STRING_TOKENS];
     int numTokens = tokenizeUserinfoString(rest, tokens, MAX_STRING_TOKENS);
-
-    Com_DPrintf("Number of tokens parsed: %d\n", numTokens);
-    for (int i = 0; i < numTokens; i++) {
-        Com_DPrintf("Token %d: %s\n", i, tokens[i]);
-    }
+    printTokens(tokens, numTokens);
 
     int teamId = -1;
     char playerName[MAX_INFO_VALUE] = {0};
@@ -176,9 +273,9 @@ void handleKill(const char *line) {
         return;
     }
 
-    int killer_id, victim_id, death_cause_index;
-    char killer_name[MAX_INFO_VALUE] = {0};
-    char victim_name[MAX_INFO_VALUE] = {0};
+    int killerId, victimId, deathCauseIndex;
+    char killerName[MAX_INFO_VALUE] = {0};
+    char victimName[MAX_INFO_VALUE] = {0};
 
     const char *colonPos = strchr(line, ':');
     if (!colonPos) {
@@ -191,46 +288,46 @@ void handleKill(const char *line) {
         return;
     }
 
-    int count = sscanf(line, "%d %d %d:", &killer_id, &victim_id, &death_cause_index);
+    int count = sscanf(line, "%d %d %d:", &killerId, &victimId, &deathCauseIndex);
     if (count != 3) {
         Com_DPrintf("Error: Invalid kill format, expected 3 numbers before the colon (%d): %s\n", count, line);
         return;
     }
 
     while (*colonPos == ' ') colonPos++;
-    count = sscanf(colonPos, "%[^ ] killed %[^ ]", killer_name, victim_name);
+    count = sscanf(colonPos, "%[^ ] killed %[^ ]", killerName, victimName);
     if (count != 2) {
         Com_DPrintf("Error: Invalid kill description format (%d): %s\n", count, colonPos);
         return;
     }
 
-    killer_name[MAX_INFO_VALUE - 1] = '\0';
-    victim_name[MAX_INFO_VALUE - 1] = '\0';
+    killerName[MAX_INFO_VALUE - 1] = '\0';
+    victimName[MAX_INFO_VALUE - 1] = '\0';
 
     Com_DPrintf("Processing kill event: Killer ID=%d, Victim ID=%d, Death Cause Index=%d\n",
-                killer_id, victim_id, death_cause_index);
+                killerId, victimId, deathCauseIndex);
 
-    client_t *killer = getPlayerByNumber(killer_id);
-    client_t *victim = getPlayerByNumber(victim_id);
+    client_t *killer = getPlayerByNumber(killerId);
+    client_t *victim = getPlayerByNumber(victimId);
 
-    if (!victim) {
-        Com_DPrintf("Error: Invalid victim ID: %d\n", victim_id);
+    if (!victim || victim->state < CS_CONNECTED) {
+        Com_DPrintf("Error: Invalid or disconnected victim ID: %d\n", victimId);
         return;
     }
 
-    if (strcmp(killer_name, "<world>") == 0) {
-        Com_DPrintf("Info: World caused death, no score updated for killer. Victim ID: %d\n", victim_id);
+    if (strcmp(killerName, "<world>") == 0) {
+        Com_DPrintf("Info: World caused death, no score updated for killer. Victim ID: %d\n", victimId);
         updatePlayerScore(victim, SCORE_DEATHS, 1);
         return;
     }
 
-    if (!killer) {
-        Com_DPrintf("Error: Invalid killer ID: %d\n", killer_id);
+    if (!killer || killer->state < CS_CONNECTED) {
+        Com_DPrintf("Error: Invalid or disconnected killer ID: %d\n", killerId);
         return;
     }
 
     Com_DPrintf("Info: Kill event - Killer: %s, Victim: %s, Death Cause: %d\n",
-                killer_name, victim_name, death_cause_index);
+                killerName, victimName, deathCauseIndex);
     Com_DPrintf("Killer userinfo:\n");
     printUserInfo(killer);
 
@@ -241,62 +338,199 @@ void handleKill(const char *line) {
     int victimTeamId = victim->teamId;
 
     if (!isValidTeamId(killerTeamId)) {
-        Com_DPrintf("Error: Killer's team info not found. Killer ID: %d\n", killer_id);
+        Com_DPrintf("Error: Killer's team info not found. Killer ID: %d\n", killerId);
     }
     if (!isValidTeamId(victimTeamId)) {
-        Com_DPrintf("Error: Victim's team info not found. Victim ID: %d\n", victim_id);
+        Com_DPrintf("Error: Victim's team info not found. Victim ID: %d\n", victimId);
     }
 
-    if (killer_id == victim_id) {
-        Com_DPrintf("Info: Suicide detected for player %d.\n", victim_id);
+    if (killerId == victimId) {
+        Com_DPrintf("Info: Suicide detected for player %d.\n", victimId);
         updatePlayerScore(victim, SCORE_DEATHS, 1);
     } else if (killerTeamId == victimTeamId) {
-        Com_DPrintf("Info: Friendly fire detected. Killer ID: %d, Victim ID: %d\n", killer_id, victim_id);
+        Com_DPrintf("Info: Friendly fire detected. Killer ID: %d, Victim ID: %d\n", killerId, victimId);
         updatePlayerScore(killer, SCORE_KILLS, -1);
     } else {
-        Com_DPrintf("Info: Enemy kill detected. Killer ID: %d, Victim ID: %d\n", killer_id, victim_id);
+        Com_DPrintf("Info: Enemy kill detected. Killer ID: %d, Victim ID: %d\n", killerId, victimId);
         updatePlayerScore(killer, SCORE_KILLS, 1);
         updatePlayerScore(victim, SCORE_DEATHS, 1);
     }
 
-    Com_DPrintf("Kill event processing completed for Killer ID: %d, Victim ID: %d\n", killer_id, victim_id);
+    Com_DPrintf("Kill event processing completed for Killer ID: %d, Victim ID: %d\n", killerId, victimId);
 
     balanceTeams();
 }
 
-void handleExit(const char *line) {
-    Com_DPrintf("Handling exit: Resetting player stats...\n");
-    for (int i = 0; i < sv_maxclients->integer; i++) {
-        client_t *client = &svs.clients[i];
-
-        if (!client) {
-            Com_DPrintf("Client %d is NULL, skipping...\n", i);
-            continue;
-        }
-
-        if (client->userinfo[0] == '\0') {
-            continue;
-        }
-
-        const char *playerName = Info_ValueForKey(client->userinfo, globalPlayerNameKey);
-        if (client->teamId != -1
-            || client->kills != 0
-            || client->deaths != 0
-            || playerName[0] != '\0') {
-            Com_DPrintf("Resetting stats for client (ID: %d) with non-default values:\n", i);
-            printUserInfo(client);
-
-            Info_SetValueForKey(client->userinfo, globalPlayerNameKey, "");
-            client->teamId = -1;
-            client->kills = 0;
-            client->deaths = 0;
-            client->state = CS_FREE;
-
-            Com_DPrintf("Client %d stats reset successfully.\n", i);
-        }
+void handleItem(const char *line) {
+    if (!line || *line == '\0') {
+        Com_DPrintf("Error: Invalid format. Line is NULL or too short: %s\n", line ? line : "(null)");
+        return;
     }
 
-    Com_DPrintf("Finished resetting player stats.\n");
+    char lineCopy[MAX_INFO_STRING];
+    Q_strncpyz(lineCopy, line, sizeof(lineCopy));
+
+    char *playerNumStr = strtok(lineCopy, " ");
+    char *item = strtok(NULL, "");
+
+    if (!playerNumStr || !item) {
+        Com_DPrintf("Error: Failed to parse item pickup line: %s\n", line);
+        return;
+    }
+
+    int playerNum = atoi(playerNumStr);
+    client_t *client = getPlayerByNumber(playerNum);
+    if (!client || client->state < CS_CONNECTED) {
+        Com_DPrintf("Error: Could not find connected player with number: %d\n", playerNum);
+        return;
+    }
+
+    if (strstr(item, "flag")) {
+        Com_DPrintf("Player %s picked up item: %s\n",
+                    Info_ValueForKey(client->userinfo, globalPlayerNameKey), item);
+        updatePlayerScore(client, SCORE_FLAG_PICKUPS, 1);
+    } else if (strstr(item, "bomb")) {
+        Com_DPrintf("Player %s picked up item: %s\n",
+                    Info_ValueForKey(client->userinfo, globalPlayerNameKey), item);
+        updatePlayerScore(client, SCORE_BOMB_PICKUPS, 1);
+    } else {
+        Com_DPrintf("Item pickup ignored: %s\n", item);
+    }
+}
+
+void handleFlag(const char *line) {
+    if (!line || *line == '\0') {
+        Com_DPrintf("Error: Invalid format. Line is NULL or too short: %s\n", line ? line : "(null)");
+        return;
+    }
+
+    char lineCopy[MAX_INFO_STRING];
+    Q_strncpyz(lineCopy, line, sizeof(lineCopy));
+
+    char *playerNumStr = strtok(lineCopy, " ");
+    char *subtypeStr = strtok(NULL, ": ");
+    char *data = strtok(NULL, "");
+
+    if (!playerNumStr || !subtypeStr || !data) {
+        Com_DPrintf("Error: Failed to parse flag event line: %s\n", line);
+        return;
+    }
+
+    int playerNum = atoi(playerNumStr);
+    int subtype = atoi(subtypeStr);
+    client_t *client = getPlayerByNumber(playerNum);
+    if (!client || client->state < CS_CONNECTED) {
+        Com_DPrintf("Error: Could not find connected player with number: %d\n", playerNum);
+        return;
+    }
+
+    switch (subtype) {
+        case 0:
+            Com_DPrintf("Player %s triggered action: flag_dropped with data: %s\n",
+                        Info_ValueForKey(client->userinfo, globalPlayerNameKey), data);
+            updatePlayerScore(client, SCORE_FLAG_DROPPED, 1);
+            break;
+        case 1:
+            Com_DPrintf("Player %s triggered action: flag_returned with data: %s\n",
+                        Info_ValueForKey(client->userinfo, globalPlayerNameKey), data);
+            updatePlayerScore(client, SCORE_FLAG_RETURNED, 1);
+            break;
+        case 2:
+            Com_DPrintf("Player %s triggered action: flag_captured with data: %s\n",
+                        Info_ValueForKey(client->userinfo, globalPlayerNameKey), data);
+            updatePlayerScore(client, SCORE_FLAG_CAPTURED, 1);
+            break;
+        default:
+            Com_DPrintf("Subtype ignored: %d\n", subtype);
+            return;
+    }
+}
+
+void handleFlagCaptureTime(const char *line) {
+    if (!line || *line == '\0') {
+        Com_DPrintf("Error: Invalid format. Line is NULL or too short: %s\n", line ? line : "(null)");
+        return;
+    }
+
+    char lineCopy[MAX_INFO_STRING];
+    Q_strncpyz(lineCopy, line, sizeof(lineCopy));
+
+    char *playerNumStr = strtok(lineCopy, ": ");
+    char *capTimeStr = strtok(NULL, "");
+
+    if (!playerNumStr || !capTimeStr) {
+        Com_DPrintf("Error: Failed to parse flag capture time line: %s\n", line);
+        return;
+    }
+
+    int playerNum = atoi(playerNumStr);
+    int capTime = atoi(capTimeStr);
+    int capTimeSeconds = (int) round((double) capTime / 1000 * 100) / 100;
+
+    client_t *client = getPlayerByNumber(playerNum);
+    if (!client || client->state < CS_CONNECTED) {
+        Com_DPrintf("Error: Could not find connected player with number: %d\n", playerNum);
+        return;
+    }
+
+    Com_DPrintf("Player %s (PlayerNum: %d) captured the flag in %d seconds\n",
+                Info_ValueForKey(client->userinfo, globalPlayerNameKey), playerNum, capTimeSeconds);
+    if (client->minCapTime == 0 || capTimeSeconds < client->minCapTime) {
+        updatePlayerScore(client, SCORE_MIN_CAPTURE_TIME, capTimeSeconds);
+    }
+    if (capTimeSeconds > client->maxCapTime) {
+        updatePlayerScore(client, SCORE_MAX_CAPTURE_TIME, capTimeSeconds);
+    }
+}
+
+void handleAssist(const char *line) {
+    if (!line || *line == '\0') {
+        Com_DPrintf("Error: Invalid format. Line is NULL or too short: %s\n", line ? line : "(null)");
+        return;
+    }
+
+    char lineCopy[MAX_INFO_STRING];
+    Q_strncpyz(lineCopy, line, sizeof(lineCopy));
+
+    char *playerNumStr = strtok(lineCopy, " ");
+    char *victimNumStr = strtok(NULL, " ");
+    char *attackerNumStr = strtok(NULL, " ");
+    char *msg = strtok(NULL, "");
+
+    if (!playerNumStr || !victimNumStr || !attackerNumStr || !msg) {
+        Com_DPrintf("Error: Failed to parse assist line: %s\n", line);
+        return;
+    }
+
+    int playerNum = atoi(playerNumStr);
+    int victimNum = atoi(victimNumStr);
+    int attackerNum = atoi(attackerNumStr);
+
+    client_t *client = getPlayerByNumber(playerNum);
+    client_t *victim = getPlayerByNumber(victimNum);
+    client_t *attacker = getPlayerByNumber(attackerNum);
+
+    if (!client || client->state < CS_CONNECTED) {
+        Com_DPrintf("Error: Could not find connected assistant with number: %d\n", playerNum);
+        return;
+    }
+
+    if (!victim || victim->state < CS_CONNECTED) {
+        Com_DPrintf("Error: Could not find connected victim with number: %d\n", victimNum);
+        return;
+    }
+
+    if (!attacker || attacker->state < CS_CONNECTED) {
+        Com_DPrintf("Error: Could not find connected attacker with number: %d\n", attackerNum);
+        return;
+    }
+
+    Com_DPrintf("Assist event: %s assisted %s to kill %s\n",
+                Info_ValueForKey(client->userinfo, globalPlayerNameKey),
+                Info_ValueForKey(attacker->userinfo, globalPlayerNameKey),
+                Info_ValueForKey(victim->userinfo, globalPlayerNameKey));
+
+    updatePlayerScore(client, SCORE_ASSISTS, 1);
 }
 
 void handlePrintLine(char *inputString) {
@@ -356,6 +590,35 @@ void handlePrintLine(char *inputString) {
     Com_DPrintf("Error: No handler found for action '%s'.\n", actionName);
 }
 
+void resetAllPlayerStatsAndSettings(void) {
+    memset(&svs.gameSettings, 0, sizeof(svs.gameSettings));
+    Com_DPrintf("Initialized gameSettings to zero.\n");
+    for (int i = 0; i < sv_maxclients->integer; i++) {
+        client_t *client = &svs.clients[i];
+        if (!client) {
+            Com_DPrintf("Client %d is NULL, skipping...\n", i);
+            continue;
+        }
+
+        if (client->userinfo[0] == '\0') {
+            continue;
+        }
+
+        client->kills = 0;
+        client->deaths = 0;
+        client->assists = 0;
+        client->flagPickups = 0;
+        client->bombPickups = 0;
+        client->flagDropped = 0;
+        client->flagReturned = 0;
+        client->flagCaptured = 0;
+        client->minCapTime = 0;
+        client->maxCapTime = 0;
+
+        Com_DPrintf("Reset stats and settings for client %d\n", i);
+    }
+}
+
 int tokenizeUserinfoString(char *str, char *tokens[], int maxTokens) {
     if (!str || !tokens || maxTokens <= 0) {
         Com_DPrintf("Error: Invalid input to tokenizeUserinfoString. str: %s, tokens: %p, maxTokens: %d\n",
@@ -409,26 +672,65 @@ void updatePlayerScore(client_t *client, ScoreFieldType field, int increment) {
             scoreField = &client->deaths;
             scoreFieldName = "deaths";
             break;
+        case SCORE_ASSISTS:
+            scoreField = &client->assists;
+            scoreFieldName = "assists";
+            break;
+        case SCORE_FLAG_DROPPED:
+            scoreField = &client->flagDropped;
+            scoreFieldName = "flag dropped";
+            break;
+        case SCORE_FLAG_RETURNED:
+            scoreField = &client->flagReturned;
+            scoreFieldName = "flag returned";
+            break;
+        case SCORE_FLAG_CAPTURED:
+            scoreField = &client->flagCaptured;
+            scoreFieldName = "flag captured";
+            break;
+        case SCORE_FLAG_PICKUPS:
+            scoreField = &client->flagPickups;
+            scoreFieldName = "flag pickups";
+            break;
+        case SCORE_BOMB_PICKUPS:
+            scoreField = &client->bombPickups;
+            scoreFieldName = "bomb pickups";
+            break;
+        case SCORE_MIN_CAPTURE_TIME:
+            scoreField = &client->minCapTime;
+            scoreFieldName = "min capture time";
+            break;
+        case SCORE_MAX_CAPTURE_TIME:
+            scoreField = &client->maxCapTime;
+            scoreFieldName = "max capture time";
+            break;
         default:
             Com_DPrintf("Error: Invalid score field for client %d\n", clientId);
             return;
     }
 
-    Com_DPrintf("Updating %s for client %d:\n", scoreFieldName, clientId);
-    Com_DPrintf("  Previous %s: %d\n", scoreFieldName, *scoreField);
-    Com_DPrintf("  Increment: %d\n", increment);
-
-    int oldScore = *scoreField;
-    *scoreField += increment;
-    int newScore = *scoreField;
-
-    Com_DPrintf("  New %s: %d\n", scoreFieldName, newScore);
-
-    if (newScore == oldScore + increment) {
-        Com_DPrintf("%s successfully updated for client %d\n", scoreFieldName, clientId);
+    if (field == SCORE_MIN_CAPTURE_TIME || field == SCORE_MAX_CAPTURE_TIME) {
+        Com_DPrintf("Updating %s for client %d:\n", scoreFieldName, clientId);
+        Com_DPrintf("  Previous %s: %d\n", scoreFieldName, *scoreField);
+        Com_DPrintf("  New %s: %d\n", scoreFieldName, increment);
+        *scoreField = increment;
     } else {
-        Com_DPrintf("Error: %s update failed for client %d. Expected: %d, Got: %d\n",
-                    scoreFieldName, clientId, oldScore + increment, newScore);
+        Com_DPrintf("Updating %s for client %d:\n", scoreFieldName, clientId);
+        Com_DPrintf("  Previous %s: %d\n", scoreFieldName, *scoreField);
+        Com_DPrintf("  Increment: %d\n", increment);
+
+        int oldScore = *scoreField;
+        *scoreField += increment;
+        int newScore = *scoreField;
+
+        Com_DPrintf("  New %s: %d\n", scoreFieldName, newScore);
+
+        if (newScore == oldScore + increment) {
+            Com_DPrintf("%s successfully updated for client %d\n", scoreFieldName, clientId);
+        } else {
+            Com_DPrintf("Error: %s update failed for client %d. Expected: %d, Got: %d\n",
+                        scoreFieldName, clientId, oldScore + increment, newScore);
+        }
     }
 }
 
@@ -445,16 +747,16 @@ void balanceTeams(void) {
     if (timeSinceLastBalance < minBalanceIntervalMs) {
         Com_DPrintf(
                 "Auto-balance skipped: waiting for minimum interval (%d seconds). Current time: %d, Last balance time: %d, Time since last balance: %d ms, Minimum interval: %d ms\n",
-                sv_minBalanceInterval->integer, currentTime, lastBalanceTime, timeSinceLastBalance,
-                minBalanceIntervalMs);
+                sv_minBalanceInterval->integer, currentTime, lastBalanceTime, timeSinceLastBalance, minBalanceIntervalMs
+        );
         atomic_flag_clear(&balanceTeamsFlag);
         return;
     }
 
     Com_DPrintf(
             "Proceeding with team balance. Current time: %d, Last balance time: %d, Time since last balance: %d ms, Minimum interval: %d ms\n",
-            currentTime, lastBalanceTime, timeSinceLastBalance, minBalanceIntervalMs);
-
+            currentTime, lastBalanceTime, timeSinceLastBalance, minBalanceIntervalMs
+    );
     Com_DPrintf("Initiating team balance process at time: %d\n", currentTime);
 
     PlayerInfo players[MAX_CLIENTS];
@@ -469,6 +771,7 @@ void balanceTeams(void) {
         if (client->state >= CS_CONNECTED) {
             int kills = client->kills;
             int deaths = client->deaths;
+            int assists = client->assists;
             int teamId = client->teamId;
 
             if (!isValidTeamId(teamId)) {
@@ -479,9 +782,17 @@ void balanceTeams(void) {
             players[numPlayers].playerNum = i;
             players[numPlayers].kills = kills;
             players[numPlayers].deaths = deaths;
+            players[numPlayers].assists = assists;
             players[numPlayers].score = kills - deaths;
             players[numPlayers].teamId = teamId;
             players[numPlayers].newTeamId = teamId;
+            players[numPlayers].flagDropped = client->flagDropped;
+            players[numPlayers].flagReturned = client->flagReturned;
+            players[numPlayers].flagCaptured = client->flagCaptured;
+            players[numPlayers].flagPickups = client->flagPickups;
+            players[numPlayers].bombPickups = client->bombPickups;
+            players[numPlayers].minCapTime = client->minCapTime;
+            players[numPlayers].maxCapTime = client->maxCapTime;
 
             if (team1Id == -1) {
                 team1Id = teamId;
@@ -489,9 +800,15 @@ void balanceTeams(void) {
                 team2Id = teamId;
             }
 
-            Com_DPrintf("Player %d: Team=%s, Kills=%d, Deaths=%d, Score=%d\n",
-                        players[numPlayers].playerNum, getTeamName(players[numPlayers].teamId),
-                        players[numPlayers].kills, players[numPlayers].deaths, players[numPlayers].score);
+            Com_DPrintf(
+                    "Player %d: Team=%s, Kills=%d, Deaths=%d, Assists=%d, Score=%d, Flag Dropped=%d, Flag Returned=%d, Flag Captured=%d, Flag Pickups=%d, Bomb Pickups=%d, Min Capture Time=%d, Max Capture Time=%d, Map Name=%s, Game Type=%d\n",
+                    players[numPlayers].playerNum, getTeamName(players[numPlayers].teamId),
+                    players[numPlayers].kills, players[numPlayers].deaths, players[numPlayers].assists,
+                    players[numPlayers].score, players[numPlayers].flagDropped, players[numPlayers].flagReturned,
+                    players[numPlayers].flagCaptured, players[numPlayers].flagPickups, players[numPlayers].bombPickups,
+                    players[numPlayers].minCapTime, players[numPlayers].maxCapTime,
+                    svs.gameSettings.mapName, svs.gameSettings.gameType
+            );
 
             numPlayers++;
         }
@@ -679,35 +996,70 @@ void logTeamBalance(PlayerInfo *players, int numPlayers, int team1Id, int team2I
     int team1Score = 0, team2Score = 0;
     int team1Kills = 0, team2Kills = 0;
     int team1Deaths = 0, team2Deaths = 0;
+    int team1Assists = 0, team2Assists = 0;
+    int team1FlagDropped = 0, team2FlagDropped = 0;
+    int team1FlagReturned = 0, team2FlagReturned = 0;
+    int team1FlagCaptured = 0, team2FlagCaptured = 0;
+    int team1FlagPickups = 0, team2FlagPickups = 0;
+    int team1BombPickups = 0, team2BombPickups = 0;
+    int team1MinCapTime = INT_MAX, team2MinCapTime = INT_MAX;
+    int team1MaxCapTime = 0, team2MaxCapTime = 0;
     int team1Count = 0, team2Count = 0;
 
     Com_DPrintf("%s team balance:\n", balanceType);
 
     for (int i = 0; i < numPlayers; i++) {
         if (svs.clients[players[i].playerNum].state >= CS_CONNECTED) {
-            Com_DPrintf("Player %d: Team=%s, Kills=%d, Deaths=%d, Score=%d\n",
-                        players[i].playerNum, getTeamName(players[i].teamId),
-                        players[i].kills, players[i].deaths, players[i].score);
+            Com_DPrintf(
+                    "Player %d: Team=%s, Kills=%d, Deaths=%d, Assists=%d, Score=%d, Flag Dropped=%d, Flag Returned=%d, Flag Captured=%d, Flag Pickups=%d, Bomb Pickups=%d, Min Capture Time=%d, Max Capture Time=%d, Map Name=%s, Game Type=%d\n",
+                    players[i].playerNum, getTeamName(players[i].teamId),
+                    players[i].kills, players[i].deaths, players[i].assists, players[i].score,
+                    players[i].flagDropped, players[i].flagReturned, players[i].flagCaptured,
+                    players[i].flagPickups, players[i].bombPickups, players[i].minCapTime, players[i].maxCapTime,
+                    svs.gameSettings.mapName, svs.gameSettings.gameType
+            );
 
             if (players[i].teamId == team1Id) {
                 team1Score += players[i].score;
                 team1Kills += players[i].kills;
                 team1Deaths += players[i].deaths;
+                team1Assists += players[i].assists;
+                team1FlagDropped += players[i].flagDropped;
+                team1FlagReturned += players[i].flagReturned;
+                team1FlagCaptured += players[i].flagCaptured;
+                team1FlagPickups += players[i].flagPickups;
+                team1BombPickups += players[i].bombPickups;
+                if (players[i].minCapTime < team1MinCapTime) team1MinCapTime = players[i].minCapTime;
+                if (players[i].maxCapTime > team1MaxCapTime) team1MaxCapTime = players[i].maxCapTime;
                 team1Count++;
             } else if (players[i].teamId == team2Id) {
                 team2Score += players[i].score;
                 team2Kills += players[i].kills;
                 team2Deaths += players[i].deaths;
+                team2Assists += players[i].assists;
+                team2FlagDropped += players[i].flagDropped;
+                team2FlagReturned += players[i].flagReturned;
+                team2FlagCaptured += players[i].flagCaptured;
+                team2FlagPickups += players[i].flagPickups;
+                team2BombPickups += players[i].bombPickups;
+                if (players[i].minCapTime < team2MinCapTime) team2MinCapTime = players[i].minCapTime;
+                if (players[i].maxCapTime > team2MaxCapTime) team2MaxCapTime = players[i].maxCapTime;
                 team2Count++;
             }
         }
     }
 
     Com_DPrintf("%s summary:\n", balanceType);
-    Com_DPrintf("%s: %d players, Total score: %d, Kills: %d, Deaths: %d\n",
-                getTeamName(team1Id), team1Count, team1Score, team1Kills, team1Deaths);
-    Com_DPrintf("%s: %d players, Total score: %d, Kills: %d, Deaths: %d\n",
-                getTeamName(team2Id), team2Count, team2Score, team2Kills, team2Deaths);
+    Com_DPrintf(
+            "%s: %d players, Total score: %d, Kills: %d, Deaths: %d, Assists: %d, Flag Dropped: %d, Flag Returned: %d, Flag Captured: %d, Flag Pickups: %d, Bomb Pickups: %d, Min Capture Time: %d, Max Capture Time: %d\n",
+            getTeamName(team1Id), team1Count, team1Score, team1Kills, team1Deaths, team1Assists, team1FlagDropped,
+            team1FlagReturned, team1FlagCaptured, team1FlagPickups, team1BombPickups, team1MinCapTime, team1MaxCapTime
+    );
+    Com_DPrintf(
+            "%s: %d players, Total score: %d, Kills: %d, Deaths: %d, Assists: %d, Flag Dropped: %d, Flag Returned: %d, Flag Captured: %d, Flag Pickups: %d, Bomb Pickups: %d, Min Capture Time: %d, Max Capture Time: %d\n",
+            getTeamName(team2Id), team2Count, team2Score, team2Kills, team2Deaths, team2Assists, team2FlagDropped,
+            team2FlagReturned, team2FlagCaptured, team2FlagPickups, team2BombPickups, team2MinCapTime, team2MaxCapTime
+    );
 }
 
 client_t *getPlayerByNumber(int playerNum) {
@@ -723,6 +1075,9 @@ client_t *getPlayerByNumber(int playerNum) {
 void printUserInfo(client_t *client) {
     if (!client) {
         Com_DPrintf("Error: Client is NULL\n");
+        return;
+    }
+    if (!com_developer || !com_developer->integer) {
         return;
     }
 
@@ -759,6 +1114,25 @@ void printUserInfo(client_t *client) {
     Com_DPrintf("  State: %s\n", stateName);
     Com_DPrintf("  Kills: %d\n", client->kills);
     Com_DPrintf("  Deaths: %d\n", client->deaths);
+    Com_DPrintf("  Assists: %d\n", client->assists);
+    Com_DPrintf("  Flag Dropped: %d\n", client->flagDropped);
+    Com_DPrintf("  Flag Returned: %d\n", client->flagReturned);
+    Com_DPrintf("  Flag Captured: %d\n", client->flagCaptured);
+    Com_DPrintf("  Flag Pickups: %d\n", client->flagPickups);
+    Com_DPrintf("  Bomb Pickups: %d\n", client->bombPickups);
+    Com_DPrintf("  Min Capture Time: %d\n", client->minCapTime);
+    Com_DPrintf("  Max Capture Time: %d\n", client->maxCapTime);
+    Com_DPrintf("  Map Name: %s\n", svs.gameSettings.mapName);
+    Com_DPrintf("  Game Type: %d\n", svs.gameSettings.gameType);
+}
+
+void printTokens(char *tokens[], int numTokens) {
+    if (com_developer && com_developer->integer) {
+        Com_DPrintf("Tokenized user info string. Number of tokens parsed: %d\n", numTokens);
+        for (int i = 0; i < numTokens; i++) {
+            Com_DPrintf("Token %d: %s\n", i, tokens[i]);
+        }
+    }
 }
 
 qboolean isValidTeamId(int teamId) {

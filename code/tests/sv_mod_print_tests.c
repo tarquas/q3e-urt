@@ -147,18 +147,6 @@ void testHandleKillWithInvalidInput(void) {
     }
 }
 
-void testHandleExitWithInvalidState(void) {
-    clearState();
-    char *invalidExitInput = "Exit: invalid_exit_format";
-    handlePrintLine(invalidExitInput);
-
-    for (int i = 0; i < sv_maxclients->integer; i++) {
-        client_t *client = getPlayerByNumber(i);
-        mu_assert_int_eq("Client state should remain free", client->state, CS_FREE);
-        mu_assert_int_eq("Client team ID should remain invalid", client->teamId, -1);
-    }
-}
-
 void testHandleUserinfoChangedWithMissingPlayerID(void) {
     clearState();
     char *invalidInput = "ClientUserinfoChanged: n\\Player\\t\\1";
@@ -343,88 +331,6 @@ void testHandleKillWithEmptyKillInfo(void) {
     }
 }
 
-void testHandleExitWithValidInput(void) {
-    const char *playerId1 = "1";
-    const char *playerId2 = "2";
-
-    connectPlayerId(playerId1);
-    connectPlayerId(playerId2);
-
-    char userinfo1[MAX_INFO_VALUE];
-    snprintf(userinfo1, sizeof(userinfo1),
-             "ClientUserinfoChanged: %s n\\Player1\\t\\1", playerId1);
-    handlePrintLine(userinfo1);
-
-    char userinfo2[MAX_INFO_VALUE];
-    snprintf(userinfo2, sizeof(userinfo2),
-             "ClientUserinfoChanged: %s n\\Player2\\t\\2", playerId2);
-    handlePrintLine(userinfo2);
-
-    char exit_info[MAX_INFO_VALUE];
-    snprintf(exit_info, sizeof(exit_info), "Exit: %s", playerId1);
-    handlePrintLine(exit_info);
-
-    client_t *client1 = getPlayerByNumber(atoi(playerId1));
-    client_t *client2 = getPlayerByNumber(atoi(playerId2));
-
-    mu_assert("Client1 should not be NULL", client1 != NULL);
-    mu_assert("Client2 should not be NULL", client2 != NULL);
-
-    mu_assert("Client1 userinfo should not be NULL", client1->userinfo != NULL);
-    mu_assert("Client2 userinfo should not be NULL", client2->userinfo != NULL);
-
-    mu_assert_int_eq("Client1 state should be reset", client1->state, CS_FREE);
-    mu_assert_int_eq("Client1 team ID should be reset", client1->teamId, -1);
-    mu_assert_int_eq("Client1 kills should be reset", client1->kills, 0);
-    mu_assert_int_eq("Client1 deaths should be reset", client1->deaths, 0);
-    mu_assert_str_eq("Client1 name should be reset", Info_ValueForKey(client1->userinfo, "name"), "");
-
-    mu_assert_int_eq("Client2 state should be reset", client2->state, CS_FREE);
-    mu_assert_int_eq("Client2 team ID should be reset", client2->teamId, -1);
-    mu_assert_int_eq("Client2 kills should be reset", client2->kills, 0);
-    mu_assert_int_eq("Client2 deaths should be reset", client2->deaths, 0);
-    mu_assert_str_eq("Client2 name should be reset", Info_ValueForKey(client2->userinfo, "name"), "");
-
-    disconnectPlayerId(playerId1);
-    disconnectPlayerId(playerId2);
-}
-
-void testHandleExitWithInvalidInput(void) {
-    clearState();
-    char *invalidExitInput = "Exit: invalid_exit_format";
-    handlePrintLine(invalidExitInput);
-
-    for (int i = 0; i < sv_maxclients->integer; i++) {
-        client_t *client = getPlayerByNumber(i);
-        mu_assert_int_eq("Client state should remain free", client->state, CS_FREE);
-        mu_assert_int_eq("Client team ID should remain invalid", client->teamId, -1);
-    }
-}
-
-void testHandleExitWithMissingPlayerID(void) {
-    clearState();
-    char *invalidExitInput = "Exit:";
-    handlePrintLine(invalidExitInput);
-
-    for (int i = 0; i < sv_maxclients->integer; i++) {
-        client_t *client = getPlayerByNumber(i);
-        mu_assert_int_eq("Client state should remain free", client->state, CS_FREE);
-        mu_assert_int_eq("Client team ID should remain invalid", client->teamId, -1);
-    }
-}
-
-void testHandleExitWithNonexistentPlayerID(void) {
-    clearState();
-    char *invalidExitInput = "Exit: 999";
-    handlePrintLine(invalidExitInput);
-
-    for (int i = 0; i < sv_maxclients->integer; i++) {
-        client_t *client = getPlayerByNumber(i);
-        mu_assert_int_eq("Client state should remain free", client->state, CS_FREE);
-        mu_assert_int_eq("Client team ID should remain invalid", client->teamId, -1);
-    }
-}
-
 void testTeamBalanceWithEqualTeams(void) {
     clearState();
     populateTeams(5, 5);
@@ -590,6 +496,628 @@ void testTeamBalanceWithOddNumberOfPlayers(void) {
                               15, -10);
 }
 
+void testHandleItemFlagPickup(void) {
+    clearState();
+    const char *playerId = "5";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player5\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    char itemInfo[MAX_INFO_VALUE];
+    snprintf(itemInfo, sizeof(itemInfo), "Item: %s flag", playerId);
+    handlePrintLine(itemInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Flag pickups should be incremented", client->flagPickups, 1);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleItemBombPickup(void) {
+    clearState();
+    const char *playerId = "6";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player6\\t\\2", playerId);
+    handlePrintLine(userinfo);
+
+    char itemInfo[MAX_INFO_VALUE];
+    snprintf(itemInfo, sizeof(itemInfo), "Item: %s bomb", playerId);
+    handlePrintLine(itemInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Bomb pickups should be incremented", client->bombPickups, 1);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleItemInvalidItem(void) {
+    clearState();
+    const char *playerId = "7";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player7\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    char itemInfo[MAX_INFO_VALUE];
+    snprintf(itemInfo, sizeof(itemInfo), "Item: %s health", playerId);
+    handlePrintLine(itemInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Flag pickups should remain 0", client->flagPickups, 0);
+    mu_assert_int_eq("Bomb pickups should remain 0", client->bombPickups, 0);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleItemMissingPlayerID(void) {
+    clearState();
+    char itemInfo[MAX_INFO_VALUE];
+    snprintf(itemInfo, sizeof(itemInfo), "Item: flag");
+    handlePrintLine(itemInfo);
+
+    for (int i = 0; i < sv_maxclients->integer; i++) {
+        client_t *client = getPlayerByNumber(i);
+        mu_assert_int_eq("Client state should remain free", client->state, CS_FREE);
+        mu_assert_int_eq("Client flag pickups should remain 0", client->flagPickups, 0);
+        mu_assert_int_eq("Client bomb pickups should remain 0", client->bombPickups, 0);
+    }
+}
+
+void testHandleItemInvalidPlayerID(void) {
+    clearState();
+    char itemInfo[MAX_INFO_VALUE];
+    snprintf(itemInfo, sizeof(itemInfo), "Item: -1 flag");
+    handlePrintLine(itemInfo);
+
+    for (int i = 0; i < sv_maxclients->integer; i++) {
+        client_t *client = getPlayerByNumber(i);
+        mu_assert_int_eq("Client state should remain free", client->state, CS_FREE);
+        mu_assert_int_eq("Client flag pickups should remain 0", client->flagPickups, 0);
+        mu_assert_int_eq("Client bomb pickups should remain 0", client->bombPickups, 0);
+    }
+}
+
+void testHandleFlagDropped(void) {
+    clearState();
+    const char *playerId = "8";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player8\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    char flagInfo[MAX_INFO_VALUE];
+    snprintf(flagInfo, sizeof(flagInfo), "Flag: %s 0: Dropped flag", playerId);
+    handlePrintLine(flagInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Flag dropped should be incremented", client->flagDropped, 1);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleFlagReturned(void) {
+    clearState();
+    const char *playerId = "9";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player9\\t\\2", playerId);
+    handlePrintLine(userinfo);
+
+    char flagInfo[MAX_INFO_VALUE];
+    snprintf(flagInfo, sizeof(flagInfo), "Flag: %s 1: Returned flag", playerId);
+    handlePrintLine(flagInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Flag returned should be incremented", client->flagReturned, 1);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleFlagCaptured(void) {
+    clearState();
+    const char *playerId = "10";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player10\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    char flagInfo[MAX_INFO_VALUE];
+    snprintf(flagInfo, sizeof(flagInfo), "Flag: %s 2: Captured flag", playerId);
+    handlePrintLine(flagInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Flag captured should be incremented", client->flagCaptured, 1);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleFlagInvalidSubtype(void) {
+    clearState();
+    const char *playerId = "11";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player11\\t\\2", playerId);
+    handlePrintLine(userinfo);
+
+    char flagInfo[MAX_INFO_VALUE];
+    snprintf(flagInfo, sizeof(flagInfo), "Flag: %s 3: Invalid subtype", playerId);
+    handlePrintLine(flagInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Flag dropped should remain 0", client->flagDropped, 0);
+    mu_assert_int_eq("Flag returned should remain 0", client->flagReturned, 0);
+    mu_assert_int_eq("Flag captured should remain 0", client->flagCaptured, 0);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleFlagMissingPlayerID(void) {
+    clearState();
+    char flagInfo[MAX_INFO_VALUE];
+    snprintf(flagInfo, sizeof(flagInfo), "Flag: 0: Dropped flag");
+    handlePrintLine(flagInfo);
+
+    for (int i = 0; i < sv_maxclients->integer; i++) {
+        client_t *client = getPlayerByNumber(i);
+        mu_assert_int_eq("Client state should remain free", client->state, CS_FREE);
+        mu_assert_int_eq("Client flag dropped should remain 0", client->flagDropped, 0);
+        mu_assert_int_eq("Client flag returned should remain 0", client->flagReturned, 0);
+        mu_assert_int_eq("Client flag captured should remain 0", client->flagCaptured, 0);
+    }
+}
+
+void testHandleFlagInvalidPlayerID(void) {
+    clearState();
+    char flagInfo[MAX_INFO_VALUE];
+    snprintf(flagInfo, sizeof(flagInfo), "Flag: -1 0: Dropped flag");
+    handlePrintLine(flagInfo);
+
+    for (int i = 0; i < sv_maxclients->integer; i++) {
+        client_t *client = getPlayerByNumber(i);
+        mu_assert_int_eq("Client state should remain free", client->state, CS_FREE);
+        mu_assert_int_eq("Client flag dropped should remain 0", client->flagDropped, 0);
+        mu_assert_int_eq("Client flag returned should remain 0", client->flagReturned, 0);
+        mu_assert_int_eq("Client flag captured should remain 0", client->flagCaptured, 0);
+    }
+}
+
+void testHandleFlagCaptureTimeWithValidInput(void) {
+    clearState();
+    const char *playerId = "10";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player10\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    char captureTimeInfo[MAX_INFO_VALUE];
+    snprintf(captureTimeInfo, sizeof(captureTimeInfo), "FlagCaptureTime: %s: 15000", playerId);
+    handlePrintLine(captureTimeInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Min capture time should be set", client->minCapTime, 15);
+    mu_assert_int_eq("Max capture time should be set", client->maxCapTime, 15);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleFlagCaptureTimeWithImprovedCaptureTime(void) {
+    clearState();
+    const char *playerId = "11";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player11\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    char captureTimeInfoInitial[MAX_INFO_VALUE];
+    snprintf(captureTimeInfoInitial, sizeof(captureTimeInfoInitial), "FlagCaptureTime: %s: 20000",
+             playerId);
+    handlePrintLine(captureTimeInfoInitial);
+
+    char captureTimeInfoImproved[MAX_INFO_VALUE];
+    snprintf(captureTimeInfoImproved, sizeof(captureTimeInfoImproved), "FlagCaptureTime: %s: 10000",
+             playerId);
+    handlePrintLine(captureTimeInfoImproved);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Min capture time should be updated", client->minCapTime, 10);
+    mu_assert_int_eq("Max capture time should remain the same", client->maxCapTime, 20);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleFlagCaptureTimeWithWorseCaptureTime(void) {
+    clearState();
+    const char *playerId = "12";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player12\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    char captureTimeInfoInitial[MAX_INFO_VALUE];
+    snprintf(captureTimeInfoInitial, sizeof(captureTimeInfoInitial), "FlagCaptureTime: %s: 5000",
+             playerId);
+    handlePrintLine(captureTimeInfoInitial);
+
+    char captureTimeInfoWorse[MAX_INFO_VALUE];
+    snprintf(captureTimeInfoWorse, sizeof(captureTimeInfoWorse), "FlagCaptureTime: %s: 30000", playerId);
+    handlePrintLine(captureTimeInfoWorse);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Min capture time should remain the same", client->minCapTime, 5);
+    mu_assert_int_eq("Max capture time should be updated", client->maxCapTime, 30);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleFlagCaptureTimeWithInvalidPlayerID(void) {
+    clearState();
+    char captureTimeInfo[MAX_INFO_VALUE];
+    snprintf(captureTimeInfo, sizeof(captureTimeInfo), "FlagCaptureTime: -1: 15000");
+    handlePrintLine(captureTimeInfo);
+
+    for (int i = 0; i < sv_maxclients->integer; i++) {
+        client_t *client = getPlayerByNumber(i);
+        mu_assert_int_eq("Client min capture time should remain 0", client->minCapTime, 0);
+        mu_assert_int_eq("Client max capture time should remain 0", client->maxCapTime, 0);
+    }
+}
+
+void testHandleFlagCaptureTimeWithMissingPlayerID(void) {
+    clearState();
+    char captureTimeInfo[MAX_INFO_VALUE];
+    snprintf(captureTimeInfo, sizeof(captureTimeInfo), "FlagCaptureTime: : 15000");
+    handlePrintLine(captureTimeInfo);
+
+    for (int i = 0; i < sv_maxclients->integer; i++) {
+        client_t *client = getPlayerByNumber(i);
+        mu_assert_int_eq("Client min capture time should remain 0", client->minCapTime, 0);
+        mu_assert_int_eq("Client max capture time should remain 0", client->maxCapTime, 0);
+    }
+}
+
+void testHandleFlagCaptureTimeWithInvalidCaptureTime(void) {
+    clearState();
+    const char *playerId = "13";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player13\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    char captureTimeInfo[MAX_INFO_VALUE];
+    snprintf(captureTimeInfo, sizeof(captureTimeInfo), "FlagCaptureTime: %s: invalid_time",
+             playerId);
+    handlePrintLine(captureTimeInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Min capture time should remain 0", client->minCapTime, 0);
+    mu_assert_int_eq("Max capture time should remain 0", client->maxCapTime, 0);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleFlagCaptureTimeWithZeroCaptureTime(void) {
+    clearState();
+    const char *playerId = "14";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player14\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    char captureTimeInfo[MAX_INFO_VALUE];
+    snprintf(captureTimeInfo, sizeof(captureTimeInfo), "FlagCaptureTime: %s: 0", playerId);
+    handlePrintLine(captureTimeInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Min capture time should remain 0", client->minCapTime, 0);
+    mu_assert_int_eq("Max capture time should remain 0", client->maxCapTime, 0);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleAssistWithValidInput(void) {
+    clearState();
+    const char *playerId = "10";
+    const char *victimId = "11";
+    const char *attackerId = "12";
+    connectPlayerId(playerId);
+    connectPlayerId(victimId);
+    connectPlayerId(attackerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player10\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player11\\t\\2", victimId);
+    handlePrintLine(userinfo);
+
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player12\\t\\1", attackerId);
+    handlePrintLine(userinfo);
+
+    char assistInfo[MAX_INFO_VALUE];
+    snprintf(assistInfo, sizeof(assistInfo), "Assist: %s %s %s: Player10 assisted Player12 to kill Player11", playerId,
+             victimId, attackerId);
+    handlePrintLine(assistInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Assists should be incremented", client->assists, 1);
+
+    disconnectPlayerId(playerId);
+    disconnectPlayerId(victimId);
+    disconnectPlayerId(attackerId);
+}
+
+void testHandleAssistWithInvalidPlayerID(void) {
+    clearState();
+    char assistInfo[MAX_INFO_VALUE];
+    snprintf(assistInfo, sizeof(assistInfo), "Assist: -1 11 12: Player10 assisted Player12 to kill Player11");
+    handlePrintLine(assistInfo);
+
+    for (int i = 0; i < sv_maxclients->integer; i++) {
+        client_t *client = getPlayerByNumber(i);
+        mu_assert_int_eq("Assists should remain 0", client->assists, 0);
+    }
+}
+
+void testHandleAssistWithMissingPlayerID(void) {
+    clearState();
+    char assistInfo[MAX_INFO_VALUE];
+    snprintf(assistInfo, sizeof(assistInfo), "Assist: 11 12: Player10 assisted Player12 to kill Player11");
+    handlePrintLine(assistInfo);
+
+    for (int i = 0; i < sv_maxclients->integer; i++) {
+        client_t *client = getPlayerByNumber(i);
+        mu_assert_int_eq("Assists should remain 0", client->assists, 0);
+    }
+}
+
+void testHandleAssistWithInvalidVictimID(void) {
+    clearState();
+    const char *playerId = "10";
+    const char *attackerId = "12";
+    connectPlayerId(playerId);
+    connectPlayerId(attackerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player10\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player12\\t\\1", attackerId);
+    handlePrintLine(userinfo);
+
+    char assistInfo[MAX_INFO_VALUE];
+    snprintf(assistInfo, sizeof(assistInfo), "Assist: %s -1 %s: Player10 assisted Player12 to kill invalid player",
+             playerId, attackerId);
+    handlePrintLine(assistInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Assists should remain 0", client->assists, 0);
+
+    disconnectPlayerId(playerId);
+    disconnectPlayerId(attackerId);
+}
+
+void testHandleAssistWithMissingVictimID(void) {
+    clearState();
+    const char *playerId = "10";
+    const char *attackerId = "12";
+    connectPlayerId(playerId);
+    connectPlayerId(attackerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player10\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player12\\t\\1", attackerId);
+    handlePrintLine(userinfo);
+
+    char assistInfo[MAX_INFO_VALUE];
+    snprintf(assistInfo, sizeof(assistInfo), "Assist: %s %s: Player10 assisted Player12 to kill missing player",
+             playerId, attackerId);
+    handlePrintLine(assistInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Assists should remain 0", client->assists, 0);
+
+    disconnectPlayerId(playerId);
+    disconnectPlayerId(attackerId);
+}
+
+void testHandleAssistWithInvalidAttackerID(void) {
+    clearState();
+    const char *playerId = "10";
+    const char *victimId = "11";
+    connectPlayerId(playerId);
+    connectPlayerId(victimId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player10\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player11\\t\\2", victimId);
+    handlePrintLine(userinfo);
+
+    char assistInfo[MAX_INFO_VALUE];
+    snprintf(assistInfo, sizeof(assistInfo), "Assist: %s %s -1: Player10 assisted invalid player to kill Player11",
+             playerId, victimId);
+    handlePrintLine(assistInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Assists should remain 0", client->assists, 0);
+
+    disconnectPlayerId(playerId);
+    disconnectPlayerId(victimId);
+}
+
+void testHandleAssistWithMissingAttackerID(void) {
+    clearState();
+    const char *playerId = "10";
+    const char *victimId = "11";
+    connectPlayerId(playerId);
+    connectPlayerId(victimId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player10\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player11\\t\\2", victimId);
+    handlePrintLine(userinfo);
+
+    char assistInfo[MAX_INFO_VALUE];
+    snprintf(assistInfo, sizeof(assistInfo), "Assist: %s %s: Player10 assisted missing player to kill Player11",
+             playerId, victimId);
+    handlePrintLine(assistInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Assists should remain 0", client->assists, 0);
+
+    disconnectPlayerId(playerId);
+    disconnectPlayerId(victimId);
+}
+
+void testHandleUserinfoChangedWithInvalidFormat(void) {
+    clearState();
+    char *invalidInput = "ClientUserinfoChanged: invalid\\format\\string";
+    handlePrintLine(invalidInput);
+
+    for (int i = 0; i < sv_maxclients->integer; i++) {
+        client_t *client = getPlayerByNumber(i);
+        mu_assert_int_eq("Client state should remain free with invalid format", client->state, CS_FREE);
+        mu_assert_int_eq("Client team ID should remain invalid with invalid format", client->teamId, -1);
+    }
+}
+
+void testHandleAssistComprehensive(void) {
+    clearState();
+    const char *playerId = "10";
+    const char *victimId = "11";
+    const char *attackerId = "12";
+    connectPlayerId(playerId);
+    connectPlayerId(victimId);
+    connectPlayerId(attackerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player10\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player11\\t\\2", victimId);
+    handlePrintLine(userinfo);
+
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player12\\t\\1", attackerId);
+    handlePrintLine(userinfo);
+
+    char assistInfo[MAX_INFO_VALUE];
+    snprintf(assistInfo, sizeof(assistInfo), "Assist: %s %s %s: Player10 assisted Player12 to kill Player11",
+             playerId, victimId, attackerId);
+    handlePrintLine(assistInfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    client_t *attacker = getPlayerByNumber(atoi(attackerId));
+    client_t *victim = getPlayerByNumber(atoi(victimId));
+
+    mu_assert("Client should not be NULL", client != NULL);
+    mu_assert_int_eq("Assists should be incremented", client->assists, 1);
+    mu_assert_int_eq("Attacker kills should remain unchanged", attacker->kills, 0);
+    mu_assert_int_eq("Victim deaths should remain unchanged", victim->deaths, 0);
+
+    disconnectPlayerId(playerId);
+    disconnectPlayerId(victimId);
+    disconnectPlayerId(attackerId);
+}
+
+void testHandleKillWithInvalidPlayerNumber(void) {
+    clearState();
+    char *invalidKillInput = "Kill: -1 -1 19: Invalid killer killed Invalid victim";
+    handlePrintLine(invalidKillInput);
+
+    for (int i = 0; i < sv_maxclients->integer; i++) {
+        client_t *client = getPlayerByNumber(i);
+        mu_assert_int_eq("Client state should remain free", client->state, CS_FREE);
+        mu_assert_int_eq("Client team ID should remain invalid", client->teamId, -1);
+    }
+}
+
+void testPlayerStatsResetOnInitGame(void) {
+    clearState();
+    const char *playerId = "3";
+    connectPlayerId(playerId);
+
+    char userinfo[MAX_INFO_VALUE];
+    snprintf(userinfo, sizeof(userinfo), "ClientUserinfoChanged: %s n\\Player3\\t\\1", playerId);
+    handlePrintLine(userinfo);
+
+    client_t *client = getPlayerByNumber(atoi(playerId));
+    client->kills = 5;
+    client->deaths = 3;
+    client->assists = 2;
+
+    handlePrintLine("InitGame: mapname\\testmap\\g_gametype\\3");
+
+    mu_assert_int_eq("Kills should be reset on InitGame", client->kills, 0);
+    mu_assert_int_eq("Deaths should be reset on InitGame", client->deaths, 0);
+    mu_assert_int_eq("Assists should be reset on InitGame", client->assists, 0);
+
+    disconnectPlayerId(playerId);
+}
+
+void testHandleMultiplePlayersInit(void) {
+    clearState();
+    const char *playerId1 = "4";
+    const char *playerId2 = "5";
+
+    connectPlayerId(playerId1);
+    connectPlayerId(playerId2);
+
+    char userinfo1[MAX_INFO_VALUE];
+    snprintf(userinfo1, sizeof(userinfo1), "ClientUserinfoChanged: %s n\\Player4\\t\\1", playerId1);
+    handlePrintLine(userinfo1);
+
+    char userinfo2[MAX_INFO_VALUE];
+    snprintf(userinfo2, sizeof(userinfo2), "ClientUserinfoChanged: %s n\\Player5\\t\\2", playerId2);
+    handlePrintLine(userinfo2);
+
+    client_t *client1 = getPlayerByNumber(atoi(playerId1));
+    client_t *client2 = getPlayerByNumber(atoi(playerId2));
+
+    mu_assert_int_eq("Client1 state should be connected", client1->state, CS_CONNECTED);
+    mu_assert_int_eq("Client2 state should be connected", client2->state, CS_CONNECTED);
+    mu_assert_str_eq("Client1 name should be set correctly", Info_ValueForKey(client1->userinfo, "name"), "Player4");
+    mu_assert_str_eq("Client2 name should be set correctly", Info_ValueForKey(client2->userinfo, "name"), "Player5");
+
+    disconnectPlayerId(playerId1);
+    disconnectPlayerId(playerId2);
+}
+
 void testPrint(void) {
     initializeServerState();
 
@@ -598,7 +1126,6 @@ void testPrint(void) {
     mu_run_test(testHandleKillWithValidInput);
     mu_run_test(testHandleUserinfoChangedWithInvalidInput);
     mu_run_test(testHandleKillWithInvalidInput);
-    mu_run_test(testHandleExitWithInvalidState);
     mu_run_test(testHandleUserinfoChangedWithMissingPlayerID);
     mu_run_test(testHandleUserinfoChangedWithInvalidPlayerNumber);
     mu_run_test(testHandleUserinfoChangedWithMissingTeamID);
@@ -615,10 +1142,6 @@ void testPrint(void) {
     mu_run_test(testHandleKillWithMissingDeathCause);
     mu_run_test(testHandleKillWithMissingColon);
     mu_run_test(testHandleKillWithEmptyKillInfo);
-    mu_run_test(testHandleExitWithValidInput);
-    mu_run_test(testHandleExitWithInvalidInput);
-    mu_run_test(testHandleExitWithMissingPlayerID);
-    mu_run_test(testHandleExitWithNonexistentPlayerID);
     mu_run_test(testTeamBalanceWithEqualTeams);
     mu_run_test(testTeamBalanceWithUnequalTeams);
     mu_run_test(testTeamBalanceWithSinglePlayer);
@@ -634,6 +1157,36 @@ void testPrint(void) {
     mu_run_test(testTeamBalanceWithBalancedScores);
     mu_run_test(testTeamBalanceWithNoPlayersAndScores);
     mu_run_test(testTeamBalanceWithOddNumberOfPlayers);
+    mu_run_test(testHandleItemFlagPickup);
+    mu_run_test(testHandleItemBombPickup);
+    mu_run_test(testHandleItemInvalidItem);
+    mu_run_test(testHandleItemMissingPlayerID);
+    mu_run_test(testHandleItemInvalidPlayerID);
+    mu_run_test(testHandleFlagDropped);
+    mu_run_test(testHandleFlagReturned);
+    mu_run_test(testHandleFlagCaptured);
+    mu_run_test(testHandleFlagInvalidSubtype);
+    mu_run_test(testHandleFlagMissingPlayerID);
+    mu_run_test(testHandleFlagInvalidPlayerID);
+    mu_run_test(testHandleFlagCaptureTimeWithValidInput);
+    mu_run_test(testHandleFlagCaptureTimeWithImprovedCaptureTime);
+    mu_run_test(testHandleFlagCaptureTimeWithWorseCaptureTime);
+    mu_run_test(testHandleFlagCaptureTimeWithInvalidPlayerID);
+    mu_run_test(testHandleFlagCaptureTimeWithMissingPlayerID);
+    mu_run_test(testHandleFlagCaptureTimeWithInvalidCaptureTime);
+    mu_run_test(testHandleFlagCaptureTimeWithZeroCaptureTime);
+    mu_run_test(testHandleAssistWithValidInput);
+    mu_run_test(testHandleAssistWithInvalidPlayerID);
+    mu_run_test(testHandleAssistWithMissingPlayerID);
+    mu_run_test(testHandleAssistWithInvalidVictimID);
+    mu_run_test(testHandleAssistWithMissingVictimID);
+    mu_run_test(testHandleAssistWithInvalidAttackerID);
+    mu_run_test(testHandleAssistWithMissingAttackerID);
+    mu_run_test(testHandleUserinfoChangedWithInvalidFormat);
+    mu_run_test(testHandleAssistComprehensive);
+    mu_run_test(testHandleKillWithInvalidPlayerNumber);
+    mu_run_test(testPlayerStatsResetOnInitGame);
+    mu_run_test(testHandleMultiplePlayersInit);
 
     finalizeServerState();
 }
@@ -766,10 +1319,24 @@ void resetPlayerDetails(client_t *client) {
 
     Info_SetValueForKey(client->userinfo, "name", "");
     Info_SetValueForKey(client->userinfo, "team", "");
+
     client->state = CS_FREE;
     client->teamId = -1;
+
     client->kills = 0;
     client->deaths = 0;
+    client->assists = 0;
+    client->flagPickups = 0;
+    client->bombPickups = 0;
+    client->flagDropped = 0;
+    client->flagReturned = 0;
+    client->flagCaptured = 0;
+    client->minCapTime = 0;
+    client->maxCapTime = 0;
+    Com_DPrintf("Reset player details for client\n");
+
+    memset(&svs.gameSettings, 0, sizeof(svs.gameSettings));
+    Com_DPrintf("Initialized gameSettings to zero.\n");
 }
 
 void initializeServerState(void) {
