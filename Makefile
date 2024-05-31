@@ -23,8 +23,9 @@ ifeq ($(COMPILE_PLATFORM),mingw32)
   endif
 endif
 
-BUILD_CLIENT     = 1
-BUILD_SERVER     = 1
+BUILD_CLIENT       = 1
+BUILD_SERVER       = 1
+BUILD_SERVER_TESTS = 0
 
 USE_SDL            = 0
 USE_CURL           = 1
@@ -1144,6 +1145,7 @@ $(B)/$(TARGET_RENDV): $(Q3RENDVOBJ)
 Q3DOBJ = \
   $(B)/ded/sv_bot.o \
   $(B)/ded/sv_client.o \
+  $(B)/ded/sv_mod_print.o \
   $(B)/ded/sv_mod.o \
   $(B)/ded/sv_mod_present.o \
   $(B)/ded/sv_mod_subnets.o \
@@ -1239,9 +1241,29 @@ ifeq ($(HAVE_VM_COMPILED),true)
   endif
 endif
 
-$(B)/$(TARGET_SERVER): $(Q3DOBJ)
+ifeq ($(and $(BUILD_SERVER), $(BUILD_SERVER_TESTS)),1)
+  TARGET_SERVER = tests_$(DNAME)$(ARCHEXT)$(BINEXT)
+
+  TEST_DIR = $(MOUNT_DIR)/tests
+  TEST_SOURCES = $(wildcard $(TEST_DIR)/*.c)
+  TEST_OBJECTS = $(patsubst $(TEST_DIR)/%.c,$(BUILD_DIR)/%.o,$(TEST_SOURCES))
+  TEST_EXCLUDE_Q3DOBJ = $(B)/ded/unix_main.o
+  FILTERED_Q3DOBJ = $(filter-out $(TEST_EXCLUDE_Q3DOBJ), $(Q3DOBJ))
+  RESULT_Q3DOBJ = $(FILTERED_Q3DOBJ) $(TEST_OBJECTS)
+
+  $(BUILD_DIR)/%.o: $(TEST_DIR)/%.c
+	@$(MKDIR) -p $(@D)
+	$(echo_cmd) "CC $<"
+	$(CC) $(CFLAGS) -c $< -o $@
+
+  TEST_LIBS = -lm
+else
+  RESULT_Q3DOBJ = $(Q3DOBJ)
+endif
+
+$(B)/$(TARGET_SERVER): $(RESULT_Q3DOBJ)
 	$(echo_cmd) "LD $@"
-	$(Q)$(CC) -o $@ $(Q3DOBJ) $(LDFLAGS)
+	$(Q)$(CC) -o $@ $(RESULT_Q3DOBJ) $(LDFLAGS) $(if $(BUILD_SERVER_TESTS),$(TEST_LIBS),)
 
 #############################################################################
 ## CLIENT/SERVER RULES
@@ -1331,9 +1353,59 @@ $(B)/ded/%.o: $(W32DIR)/%.c
 $(B)/ded/%.o: $(W32DIR)/%.rc
 	$(DO_WINDRES)
 
+PROJECT_DIR := $(PWD)
+UID := $(shell id -u)
+GID := $(shell id -g)
+DOCKER_COMPOSE_CMD := UID=$(UID) GID=$(GID) docker-compose -f $(PROJECT_DIR)/docker-compose.yml
+
 #############################################################################
 # MISC
 #############################################################################
+
+.PHONY: compile-local-server
+compile-local-server:
+	@$(MAKE) clean release BUILD_CLIENT=0 BUILD_SERVER=1 SERVER_CFLAGS="-DDUMMY_DEFINE"
+
+.PHONY: compile-local-server-tests
+compile-local-server-tests:
+	@$(MAKE) clean release BUILD_CLIENT=0 BUILD_SERVER=1 BUILD_SERVER_TESTS=1 SERVER_CFLAGS="-DDUMMY_DEFINE"
+
+.PHONY: run-local-server-tests
+run-local-server-tests: compile-local-server-tests
+	$(echo_cmd) "Running tests..."
+	@./$(BR)/tests_$(TARGET_SERVER)
+
+.PHONY: build-server
+build-server:
+	@echo "Building the Docker images and project..."
+	@$(MAKE) B=$(BR) clean makedirs
+	@$(DOCKER_COMPOSE_CMD) build
+
+.PHONY: run-server
+run-server: build-server
+	@echo "Starting the Urban Terror server..."
+	@$(DOCKER_COMPOSE_CMD) up -d urt-server
+	@echo "Urban Terror server is running."
+
+.PHONY: run-server-interactive
+run-server-interactive: build-server
+	@echo "Starting and attaching to the Urban Terror server interactively..."
+	@$(DOCKER_COMPOSE_CMD) run urt-server
+
+.PHONY: shell-server
+shell-server:
+	@echo "Accessing interactive shell of the Urban Terror server..."
+	@docker exec -it urt-server /bin/bash
+
+.PHONY: logs-server
+logs-server:
+	@echo "Displaying logs for the Urban Terror server..."
+	@$(DOCKER_COMPOSE_CMD) logs -f urt-server
+
+.PHONY: clean-server
+clean-server:
+	@echo "Cleaning up Docker volumes..."
+	@$(DOCKER_COMPOSE_CMD) down -v
 
 install: release
 	@for i in $(TARGETS); do \

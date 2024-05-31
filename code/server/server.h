@@ -178,9 +178,31 @@ struct leakyBucket_s {
 	leakyBucket_t *prev, *next;
 };
 
+typedef struct {
+    char mapName[64];                    // Name of the map
+    int gameType;                        // Game type
+    qboolean ffa_lms_gametype;           // FFA or LMS game type flag
+    qboolean ctf_gametype;               // CTF game type flag
+    qboolean ts_gametype;                // TS game type flag
+    qboolean tdm_gametype;               // TDM game type flag
+    qboolean bomb_gametype;              // Bomb game type flag
+    qboolean freeze_gametype;            // Freeze game type flag
+} GameSettings;
+
 typedef struct client_s {
 	clientState_t	state;
 	char			userinfo[MAX_INFO_STRING];		// name, etc
+    int             teamId;                         // ID of the team to which the client belongs
+    int             kills;                          // Number of kills the client has made
+    int             deaths;                         // Number of times the client has died
+    int             assists;                        // Number of assists by the client
+    int             flagPickups;                    // Number of flag pickups by the client
+    int             bombPickups;                    // Number of bomb pickups by the client
+    int             flagDropped;                    // Number of flags dropped
+    int             flagReturned;                   // Number of flags returned
+    int             flagCaptured;                   // Number of flags captured
+    int             minCapTime;                     // Minimum capture time in seconds
+    int             maxCapTime;                     // Maximum capture time in seconds
 
 	char			reliableCommands[MAX_RELIABLE_COMMANDS][MAX_STRING_CHARS];
 	int				reliableSequence;		// last added reliable message, not necessarily sent or acknowledged yet
@@ -292,6 +314,7 @@ typedef struct client_s {
 // this structure will be cleared only when the game dll changes
 typedef struct {
 	qboolean	initialized;				// sv_init has completed
+    GameSettings gameSettings;              // Reference to game settings
 
 	int			time;						// will be strictly increasing across level changes
 	int			msgTime;					// will be used as precise sent time
@@ -424,6 +447,8 @@ extern  cvar_t  *sv_hideChatCmd;
 extern	cvar_t	*sv_specChatGlobal;
 extern	cvar_t	*sv_colourNames;
 
+extern cvar_t *sv_scoreThreshold;
+extern cvar_t *sv_minBalanceInterval;
 
 //===========================================================
 
@@ -513,6 +538,11 @@ void QDECL SV_LogPrintf(const char *fmt, ...);
 char* SVM_OnGamePrint(char *string);
 int SVM_OnClientCommand( client_t *cl, char *s );
 int SVM_OnServerCommand(client_t **pcl, char *message);
+
+//
+// sv_mod_print.c
+//
+void handlePrintLine(char *string);
 
 //
 // sv_subnets.c
